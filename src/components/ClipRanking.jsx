@@ -312,7 +312,7 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
 const PAGE_SIZE = 20;
 
 export default function ClipRanking() {
-  const [period, setPeriod] = useState("all"); // all | year | month | day
+  const [period, setPeriod] = useState("day"); // all | year | month | day
   const [selectedDay, setSelectedDay] = useState(() => new Date());
   const [page, setPage] = useState(1);
   const { clips, loading, error: clipsError, totalCount } = useClips(
