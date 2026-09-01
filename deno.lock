@@ -28,6 +28,7 @@
         "npm:lucide-react@^1.38.0",
         "npm:oxlint@^1.79.0",
         "npm:react-dom@^19.2.8",
+        "npm:react-router-dom@^7.18.3",
         "npm:react@^19.2.8",
         "npm:vite@^8.2.2"
       ]
