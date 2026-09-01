@@ -9,7 +9,6 @@ import {
   useBroadcasterSearch,
   useBroadcasterRequest,
   useCommentReport,
-  useTopBroadcasters,
 } from "../lib/use-clip-ranking";
 
 const PERIOD_TABS = [
@@ -325,7 +324,6 @@ export default function ClipRanking() {
   const clipIds = useMemo(() => clips.map((c) => c.id), [clips]);
   const { counts, myVotes, vote } = useReactions(clipIds);
   const { favorites, toggle: toggleFavorite } = useFavorites();
-  const { broadcasters: topBroadcasters } = useTopBroadcasters(8);
 
   const [activeCommentClipId, setActiveCommentClipId] = useState(null);
   const [commentsDataByClip, setCommentsDataByClip] = useState({});
@@ -402,7 +400,7 @@ export default function ClipRanking() {
             <span style={styles.eyebrow}>デイリークリップランキング</span>
           </div>
           <h1 className="clip-title-font" style={styles.h1}>
-            CLIP<span style={{ color: "#FF4D6D" }}>VOTE</span>
+            Twitchクリップ掲示板
           </h1>
           <p style={styles.tagline}>視聴回数順のクリップランキング</p>
         </div>
@@ -458,21 +456,6 @@ export default function ClipRanking() {
               style={isSameDay(d, selectedDay) ? styles.tabActive : styles.tab}
             >
               {formatDayLabel(d)}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {!searchQuery.trim() && topBroadcasters.length > 0 && (
-        <div style={styles.broadcasterChips}>
-          {topBroadcasters.map((b) => (
-            <button
-              key={b.streamer}
-              onClick={() => setSearchQuery(b.streamer)}
-              style={styles.chip}
-              aria-label={`配信者チップ: ${b.streamer}`}
-            >
-              {b.streamer}
             </button>
           ))}
         </div>
@@ -705,15 +688,6 @@ const styles = {
     alignItems: "center",
   },
   pageInfo: { fontSize: 13, color: "#8A8A99" },
-  broadcasterChips: { display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 20 },
-  chip: {
-    background: "#1C1C26",
-    border: "1px solid #2E2E3A",
-    color: "#C4C4D0",
-    borderRadius: 20,
-    padding: "5px 12px",
-    fontSize: 12.5,
-  },
   errorBanner: {
     background: "#3A1D1D",
     color: "#F0997B",
