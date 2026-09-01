@@ -29,6 +29,7 @@ const TARGET_GAME_IDS = (Deno.env.get("TARGET_GAME_IDS") ?? "")
   .filter(Boolean);
 
 const STREAMS_PER_GAME = 100; // 1カテゴリあたり発見する配信の上限（Helixの最大値）
+const TOP_JA_STREAMS_LIMIT = 100; // ゲームカテゴリを問わない「日本語配信 視聴者数上位」の発見件数上限
 const BROADCASTER_STALE_DAYS = 30; // これより長く見つからない配信者は同期対象から外す
 
 interface TwitchClip {
@@ -78,6 +79,32 @@ async function discoverJapaneseBroadcasters(token: string, gameId: string): Prom
   });
   if (!res.ok) {
     console.error(`game_id=${gameId} の配信者発見に失敗: ${res.status}`);
+    return [];
+  }
+  const data = await res.json();
+  return data.data as TwitchStream[];
+}
+
+/**
+ * ゲームカテゴリを問わず、日本語配信の視聴者数上位を発見する。
+ * Helixの get streams はデフォルトで視聴者数降順に返るため、
+ * game_id を指定せず language=ja だけで問い合わせると「今ライブ中の日本語配信 人気順」が取れる。
+ * 釈迦・加藤純一のように特定ゲームに縛られない大手配信者は、カテゴリ別発見だけでは
+ * 拾えないため、この全体人気順の発見を別途行い、カテゴリ別発見の結果とマージする。
+ */
+async function discoverTopJapaneseBroadcasters(token: string): Promise<TwitchStream[]> {
+  const url = new URL("https://api.twitch.tv/helix/streams");
+  url.searchParams.set("language", "ja");
+  url.searchParams.set("first", String(TOP_JA_STREAMS_LIMIT));
+
+  const res = await fetch(url, {
+    headers: {
+      "Client-Id": TWITCH_CLIENT_ID,
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (!res.ok) {
+    console.error(`日本語配信 人気順の発見に失敗: ${res.status}`);
     return [];
   }
   const data = await res.json();
@@ -144,7 +171,9 @@ async function main() {
   const token = await getAppAccessToken();
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-  // 1. 対象ゲームを日本語配信中の配信者を発見し、tracked_broadcastersに蓄積
+  // 1. 配信者の発見。二種類の発見結果をマージしてtracked_broadcastersに蓄積する。
+  //    a. 対象ゲームカテゴリ × 日本語配信（ニッチなゲームの配信者を拾う）
+  //    b. ゲームカテゴリを問わない日本語配信の視聴者数上位（釈迦・加藤純一のような大手配信者を拾う）
   const discovered = new Map<string, string>(); // id -> name
   for (const gameId of TARGET_GAME_IDS) {
     const streams = await discoverJapaneseBroadcasters(token, gameId);
@@ -152,7 +181,11 @@ async function main() {
       discovered.set(s.user_id, s.user_name);
     }
   }
-  console.log(`新たに発見した配信者数: ${discovered.size}`);
+  const topJaStreams = await discoverTopJapaneseBroadcasters(token);
+  for (const s of topJaStreams) {
+    discovered.set(s.user_id, s.user_name);
+  }
+  console.log(`新たに発見した配信者数: ${discovered.size}（うち人気順発見: ${topJaStreams.length}）`);
 
   if (discovered.size > 0) {
     const rows = [...discovered.entries()].map(([broadcaster_id, broadcaster_name]) => ({
