@@ -14,6 +14,7 @@ export interface Clip {
   game: string;
   view_count: number;
   thumbnail_url: string | null;
+  twitch_created_at: string | null;
 }
 
 export interface ReactionCounts {
@@ -28,8 +29,42 @@ export interface CommentRow {
   created_at: string;
 }
 
-/** 日次ランキングのクリップ一覧を取得（view_count降順） */
-export function useClips(limit = 20) {
+export type Period = "all" | "year" | "month" | "day";
+
+/**
+ * 期間指定から開始・終了日時(ISO文字列)を計算する。
+ * tw-clipの「全期間/年別/月別/日別」に相当するタブ切り替えに使う。
+ * referenceDate はその期間の中の1日（例: 日別なら見たい日、月別ならその月の1日など）。
+ */
+export function getPeriodRange(period: Period, referenceDate: Date = new Date()) {
+  if (period === "all") return { start: null, end: null };
+
+  const start = new Date(referenceDate);
+  const end = new Date(referenceDate);
+
+  if (period === "year") {
+    start.setMonth(0, 1);
+    start.setHours(0, 0, 0, 0);
+    end.setFullYear(start.getFullYear() + 1, 0, 1);
+    end.setHours(0, 0, 0, 0);
+  } else if (period === "month") {
+    start.setDate(1);
+    start.setHours(0, 0, 0, 0);
+    end.setMonth(start.getMonth() + 1, 1);
+    end.setHours(0, 0, 0, 0);
+  } else {
+    // day: tw-clipに合わせて「その日の朝6時〜翌朝6時」を1日の区切りとする
+    start.setHours(6, 0, 0, 0);
+    if (referenceDate.getHours() < 6) start.setDate(start.getDate() - 1);
+    end.setTime(start.getTime());
+    end.setDate(end.getDate() + 1);
+  }
+
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
+/** 日次ランキングのクリップ一覧を取得（view_count降順、期間指定つき） */
+export function useClips(limit = 20, period: Period = "all", referenceDate?: Date) {
   const [clips, setClips] = useState<Clip[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -37,23 +72,31 @@ export function useClips(limit = 20) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data, error } = await supabase
+      setLoading(true);
+      const { start, end } = getPeriodRange(period, referenceDate);
+      let query = supabase
         .from("clips")
-        .select("id, title, streamer, game, view_count, thumbnail_url")
+        .select("id, title, streamer, game, view_count, thumbnail_url, twitch_created_at")
         .order("view_count", { ascending: false })
         .limit(limit);
+
+      if (start) query = query.gte("twitch_created_at", start);
+      if (end) query = query.lt("twitch_created_at", end);
+
+      const { data, error } = await query;
       if (cancelled) return;
       if (error) {
         setError("クリップの取得に失敗しました");
       } else {
         setClips(data ?? []);
+        setError(null);
       }
       setLoading(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [limit]);
+  }, [limit, period, referenceDate?.getTime()]);
 
   return { clips, loading, error };
 }
@@ -329,4 +372,33 @@ export function useCommentReport() {
   }, []);
 
   return { report, reporting };
+}
+
+export interface TopBroadcaster {
+  streamer: string;
+  total_views: number;
+  clip_count: number;
+}
+
+/** 人気配信者一覧（合計視聴回数順）。tw-clipの「登録ユーザー一覧」に相当 */
+export function useTopBroadcasters(limit = 20) {
+  const [broadcasters, setBroadcasters] = useState<TopBroadcaster[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase.rpc("get_top_broadcasters", {
+        broadcaster_limit: limit,
+      });
+      if (cancelled) return;
+      if (!error) setBroadcasters(data ?? []);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [limit]);
+
+  return { broadcasters, loading };
 }

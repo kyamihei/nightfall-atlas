@@ -39,6 +39,7 @@ interface TwitchClip {
   view_count: number;
   thumbnail_url: string;
   game_id: string;
+  created_at: string; // クリップが実際に作成された日時（期間フィルタに使う）
 }
 
 interface TwitchStream {
@@ -201,6 +202,7 @@ async function main() {
     game: gameNames.get(clip.game_id) ?? "不明",
     view_count: clip.view_count,
     thumbnail_url: clip.thumbnail_url,
+    twitch_created_at: clip.created_at,
   }));
 
   for (let i = 0; i < rows.length; i += 100) {

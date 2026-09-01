@@ -8,7 +8,15 @@ import {
   useBroadcasterSearch,
   useBroadcasterRequest,
   useCommentReport,
+  useTopBroadcasters,
 } from "../lib/use-clip-ranking";
+
+const PERIOD_TABS = [
+  { value: "all", label: "全期間" },
+  { value: "year", label: "今年" },
+  { value: "month", label: "今月" },
+  { value: "day", label: "今日" },
+];
 
 const TAG_COLORS = {
   coral: { bg: "#3A241D", text: "#F0997B" },
@@ -59,6 +67,7 @@ function ClipRow({
   const { comments, submit, submitting, error } = useComments(clip.id);
   const [draft, setDraft] = useState("");
   const [localError, setLocalError] = useState("");
+  const [playerOpen, setPlayerOpen] = useState(false);
 
   const tagStyle = getTagColor(clip.game);
 
@@ -86,14 +95,17 @@ function ClipRow({
           {String(clip.rank).padStart(2, "0")}
         </div>
 
-        <div
+        <button
+          onClick={() => setPlayerOpen((o) => !o)}
           style={{
             ...styles.thumb,
             background: clip.thumbnail_url ? "transparent" : tagStyle.bg,
             color: tagStyle.text,
             padding: clip.thumbnail_url ? 0 : styles.thumb.padding,
             overflow: "hidden",
+            border: "none",
           }}
+          aria-label={playerOpen ? "動画を閉じる" : "動画を再生"}
         >
           {clip.thumbnail_url ? (
             <img
@@ -104,7 +116,7 @@ function ClipRow({
           ) : (
             clip.game
           )}
-        </div>
+        </button>
 
         <div style={styles.infoCol}>
           <p className="clip-title-font" style={styles.clipTitle}>{clip.title}</p>
@@ -163,6 +175,17 @@ function ClipRow({
           </button>
         </div>
       </div>
+
+      {playerOpen && (
+        <div style={styles.playerPanel}>
+          <iframe
+            src={`https://clips.twitch.tv/embed?clip=${clip.id}&parent=${window.location.hostname}&autoplay=false`}
+            style={styles.playerFrame}
+            allowFullScreen
+            title={clip.title}
+          />
+        </div>
+      )}
 
       {open && (
         <div style={styles.commentPanel}>
@@ -235,10 +258,12 @@ function ClipRow({
 }
 
 export default function ClipRanking() {
-  const { clips, loading, error: clipsError } = useClips(20);
+  const [period, setPeriod] = useState("all"); // all | year | month | day
+  const { clips, loading, error: clipsError } = useClips(20, period);
   const clipIds = useMemo(() => clips.map((c) => c.id), [clips]);
   const { counts, myVotes, vote } = useReactions(clipIds);
   const { favorites, toggle: toggleFavorite } = useFavorites();
+  const { broadcasters: topBroadcasters } = useTopBroadcasters(8);
 
   const [openComments, setOpenComments] = useState({});
   const [nameDraft, setNameDraft] = useState("");
@@ -335,6 +360,33 @@ export default function ClipRanking() {
           </div>
         </div>
       </header>
+
+      <div style={styles.periodTabs}>
+        {PERIOD_TABS.map((t) => (
+          <button
+            key={t.value}
+            onClick={() => setPeriod(t.value)}
+            style={period === t.value ? styles.tabActive : styles.tab}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {!searchQuery.trim() && topBroadcasters.length > 0 && (
+        <div style={styles.broadcasterChips}>
+          {topBroadcasters.map((b) => (
+            <button
+              key={b.streamer}
+              onClick={() => setSearchQuery(b.streamer)}
+              style={styles.chip}
+              aria-label={`配信者チップ: ${b.streamer}`}
+            >
+              {b.streamer}
+            </button>
+          ))}
+        </div>
+      )}
 
       {clipsError && <div style={styles.errorBanner}>{clipsError}</div>}
 
@@ -498,6 +550,16 @@ const styles = {
     fontSize: 13,
     fontWeight: 500,
   },
+  periodTabs: { display: "flex", gap: 6, marginBottom: 16 },
+  broadcasterChips: { display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 20 },
+  chip: {
+    background: "#1C1C26",
+    border: "1px solid #2E2E3A",
+    color: "#C4C4D0",
+    borderRadius: 20,
+    padding: "5px 12px",
+    fontSize: 12.5,
+  },
   errorBanner: {
     background: "#3A1D1D",
     color: "#F0997B",
@@ -588,6 +650,17 @@ const styles = {
     borderRadius: 8,
     padding: "6px 9px",
     fontSize: 12.5,
+  },
+  playerPanel: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTop: "1px solid #24242F",
+  },
+  playerFrame: {
+    width: "100%",
+    aspectRatio: "16 / 9",
+    border: "none",
+    borderRadius: 8,
   },
   commentPanel: {
     marginTop: 12,
