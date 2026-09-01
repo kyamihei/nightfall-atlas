@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from "react";
 import { Heart, ThumbsDown, Star, MessageCircle, Send, Loader2, Flag, Search, UserPlus } from "lucide-react";
-import { supabase, ensureAnonymousSession } from "../lib/supabase-client";
 import {
   useClips,
   useReactions,
@@ -8,6 +7,7 @@ import {
   useComments,
   useBroadcasterSearch,
   useBroadcasterRequest,
+  useCommentReport,
 } from "../lib/use-clip-ranking";
 
 const TAG_COLORS = {
@@ -39,12 +39,6 @@ function timeAgo(ts) {
   const hr = Math.floor(min / 60);
   if (hr < 24) return `${hr}時間前`;
   return `${Math.floor(hr / 24)}日前`;
-}
-
-/** 通報はhookが用意されていないため、スキーマのRLS（comment_reports, insert_own）に沿って直接insertする */
-async function reportComment(commentId) {
-  const user = await ensureAnonymousSession();
-  await supabase.from("comment_reports").insert({ comment_id: commentId, anon_id: user.id });
 }
 
 function ClipRow({
@@ -255,6 +249,7 @@ export default function ClipRanking() {
 
   const { results: broadcasterResults, searching: broadcasterSearching } = useBroadcasterSearch(searchQuery);
   const { request: requestBroadcaster, submitting: requesting, result: requestResult } = useBroadcasterRequest();
+  const { report: reportComment } = useCommentReport();
 
   function toggleComments(clipId) {
     setOpenComments((prev) => ({ ...prev, [clipId]: !prev[clipId] }));

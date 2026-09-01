@@ -304,3 +304,29 @@ export function useBroadcasterRequest() {
 
   return { request, submitting, result };
 }
+
+/** コメント通報。RLSの comment_reports_insert_own ポリシーに従い、自分のanon_idで1件だけ挿入する */
+export function useCommentReport() {
+  const [reporting, setReporting] = useState(false);
+
+  const report = useCallback(async (commentId: string) => {
+    setReporting(true);
+    try {
+      const user = await ensureAnonymousSession();
+      const { error } = await supabase
+        .from("comment_reports")
+        .insert({ comment_id: commentId, anon_id: user.id });
+      // unique制約(comment_id, anon_id)違反 = 既に通報済み。エラーとして扱わない
+      if (error && error.code !== "23505") {
+        throw error;
+      }
+      return true;
+    } catch {
+      return false;
+    } finally {
+      setReporting(false);
+    }
+  }, []);
+
+  return { report, reporting };
+}
