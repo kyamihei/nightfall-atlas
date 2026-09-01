@@ -57,7 +57,7 @@ export default function BroadcasterList() {
           <div style={styles.list}>
             {visible.length === 0 && <div style={styles.emptyState}>該当する配信者が見つかりませんでした。</div>}
             {visible.map((b, i) => (
-              <div key={b.streamer} style={styles.row}>
+              <Link key={b.streamer} to={`/broadcasters/${encodeURIComponent(b.streamer)}`} style={styles.row}>
                 <div style={styles.rankNum}>{String((page - 1) * PAGE_SIZE + i + 1).padStart(2, "0")}</div>
                 <div style={styles.infoCol}>
                   <div style={styles.nameRow}>
@@ -68,7 +68,7 @@ export default function BroadcasterList() {
                     合計 {formatViews(b.total_views)}回視聴 ・ クリップ{b.clip_count}件
                   </p>
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
 
@@ -158,6 +158,8 @@ const styles = {
     border: "1px solid #24242F",
     borderRadius: 10,
     padding: "12px 16px",
+    color: "#EDEDF2",
+    textDecoration: "none",
   },
   rankNum: { fontSize: 15, fontWeight: 600, color: "#565660", width: 28, flexShrink: 0 },
   infoCol: { flex: 1, minWidth: 0 },

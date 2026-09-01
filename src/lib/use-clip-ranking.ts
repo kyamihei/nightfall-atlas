@@ -105,6 +105,38 @@ export function useClips(limit = 20, period: Period = "all", referenceDate?: Dat
   return { clips, loading, error, totalCount };
 }
 
+/** クリップ詳細ページ用に、単一クリップをidで取得する */
+export function useClip(clipId: string) {
+  const [clip, setClip] = useState<Clip | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      const { data, error } = await supabase
+        .from("clips")
+        .select("id, title, streamer, game, view_count, thumbnail_url, twitch_created_at")
+        .eq("id", clipId)
+        .maybeSingle();
+      if (cancelled) return;
+      if (error || !data) {
+        setError("クリップが見つかりませんでした");
+      } else {
+        setClip(data);
+        setError(null);
+      }
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clipId]);
+
+  return { clip, loading, error };
+}
+
 /**
  * 自分のいいね/よくないね状態と、クリップごとの合計カウントを扱うフック。
  * カウントはRPC（下記SQL関数）でまとめて取得し、投票はreactionsテーブルへの
@@ -408,4 +440,62 @@ export function useTopBroadcasters(limit = 20, offset = 0) {
   }, [limit, offset]);
 
   return { broadcasters, loading };
+}
+
+export interface BroadcasterProfile {
+  clips: Clip[];
+  tag: string | null;
+  totalViews: number;
+  clipCount: number;
+}
+
+/** 配信者詳細ページ用に、名前でその配信者のクリップ一覧とタグをまとめて取得する */
+export function useBroadcasterProfile(streamer: string, limit = 50) {
+  const [profile, setProfile] = useState<BroadcasterProfile>({
+    clips: [],
+    tag: null,
+    totalViews: 0,
+    clipCount: 0,
+  });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      const [clipsRes, tagRes] = await Promise.all([
+        supabase
+          .from("clips")
+          .select("id, title, streamer, game, view_count, thumbnail_url, twitch_created_at")
+          .eq("streamer", streamer)
+          .order("view_count", { ascending: false })
+          .limit(limit),
+        supabase
+          .from("tracked_broadcasters")
+          .select("tag")
+          .eq("broadcaster_name", streamer)
+          .maybeSingle(),
+      ]);
+      if (cancelled) return;
+      if (clipsRes.error) {
+        setError("配信者情報の取得に失敗しました");
+      } else {
+        const clips = clipsRes.data ?? [];
+        setProfile({
+          clips,
+          tag: tagRes.data?.tag ?? null,
+          totalViews: clips.reduce((sum, c) => sum + c.view_count, 0),
+          clipCount: clips.length,
+        });
+        setError(null);
+      }
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [streamer, limit]);
+
+  return { ...profile, loading, error };
 }

@@ -132,9 +132,14 @@ function ClipRow({
         </button>
 
         <div style={styles.infoCol}>
-          <p className="clip-title-font" style={styles.clipTitle}>{clip.title}</p>
+          <Link to={`/clips/${clip.id}`} style={styles.clipTitleLink}>
+            <p className="clip-title-font" style={styles.clipTitle}>{clip.title}</p>
+          </Link>
           <p style={styles.metaLine}>
-            {clip.streamer} ・ ▶ {formatViews(clip.view_count)}回視聴
+            <Link to={`/broadcasters/${encodeURIComponent(clip.streamer)}`} style={styles.streamerLink}>
+              {clip.streamer}
+            </Link>
+            {" ・ ▶ "}{formatViews(clip.view_count)}回視聴
           </p>
         </div>
 
@@ -777,6 +782,8 @@ const styles = {
     flexShrink: 0,
   },
   infoCol: { flex: 1, minWidth: 0 },
+  clipTitleLink: { textDecoration: "none", color: "inherit" },
+  streamerLink: { color: "#EDEDF2", textDecoration: "none", fontWeight: 500 },
   clipTitle: {
     fontSize: 15,
     fontWeight: 500,
