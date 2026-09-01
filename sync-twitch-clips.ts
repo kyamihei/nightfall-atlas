@@ -38,7 +38,7 @@ const BROADCASTER_STALE_DAYS = 30; // これより長く見つからない配信
 // 「全期間」の蓄積をするには明示的に広い期間を指定して取得する必要がある。
 // 件数上限は設けず、配信者の投稿履歴を最後まで（カーソルが尽きるまで）取得する。
 const BACKFILL_START_DATE = new Date("2016-01-01T00:00:00Z"); // Twitchのクリップ機能の開始時期に合わせた起点
-const BACKFILL_BATCH_SIZE = 20; // 1回の実行でバックフィルする配信者数の上限（件数無制限化により1人あたりのコストが増えたため縮小）
+const BACKFILL_BATCH_SIZE = 200; // 1回の実行でバックフィルする配信者数の上限（実行頻度は変えず、1回あたりの処理人数で調整する）
 const HELIX_CLIPS_PAGE_SIZE = 100; // Helix /clips の1ページあたり最大件数
 const BACKFILL_MAX_PAGES = 500; // 暴走防止用の技術的な安全上限（50,000件相当。通常の配信者では到達しない想定）
 const RATE_LIMIT_RETRY_MAX = 3; // 429応答時のリトライ回数
