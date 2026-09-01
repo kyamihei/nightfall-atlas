@@ -39,3 +39,4 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           TARGET_GAME_IDS: ${{ secrets.TARGET_GAME_IDS }}
         run: deno run --allow-net --allow-env sync-twitch-clips.ts
+
