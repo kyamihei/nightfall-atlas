@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from "react";
-import { Heart, ThumbsDown, Star, MessageCircle, Send, Loader2, Flag, Search, UserPlus } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Heart, ThumbsDown, Star, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X } from "lucide-react";
 import {
   useClips,
   useReactions,
@@ -57,30 +57,21 @@ function ClipRow({
   onVote,
   isFav,
   onToggleFavorite,
-  open,
-  onToggleOpen,
-  nameDraft,
-  onNameDraftChange,
-  reportedIds,
-  onReport,
+  commentsActive,
+  onOpenComments,
+  onCommentsUpdate,
 }) {
-  const { comments, submit, submitting, error } = useComments(clip.id);
-  const [draft, setDraft] = useState("");
-  const [localError, setLocalError] = useState("");
+  // このクリップのコメント購読はここ1箇所のみで行い、サイドパネル用のデータは
+  // onCommentsUpdate経由で親に伝える（同一clipへの二重購読はSupabase Realtimeがエラーになるため）
+  const commentsState = useComments(clip.id);
+  const { comments, submit, submitting, error } = commentsState;
   const [playerOpen, setPlayerOpen] = useState(false);
 
-  const tagStyle = getTagColor(clip.game);
+  useEffect(() => {
+    onCommentsUpdate(clip.id, { comments, submit, submitting, error });
+  }, [clip.id, comments, submit, submitting, error, onCommentsUpdate]);
 
-  function handleSubmit() {
-    const body = draft.trim();
-    if (!body) {
-      setLocalError("コメントを入力してください。");
-      return;
-    }
-    setLocalError("");
-    submit(body, nameDraft);
-    setDraft("");
-  }
+  const tagStyle = getTagColor(clip.game);
 
   return (
     <div style={styles.row}>
@@ -162,11 +153,11 @@ function ClipRow({
             <Star size={15} fill={isFav ? "#FFC857" : "none"} />
           </button>
           <button
-            onClick={() => onToggleOpen(clip.id)}
+            onClick={() => onOpenComments(clip.id)}
             style={{
               ...styles.actionBtn,
-              color: open ? "#EDEDF2" : "#8A8A99",
-              borderColor: "#2E2E3A",
+              color: commentsActive ? "#EDEDF2" : "#8A8A99",
+              borderColor: commentsActive ? "#3A3A48" : "#2E2E3A",
             }}
             aria-label="コメントを開く"
           >
@@ -186,73 +177,108 @@ function ClipRow({
           />
         </div>
       )}
+    </div>
+  );
+}
 
-      {open && (
-        <div style={styles.commentPanel}>
-          {comments.length === 0 && (
-            <p style={styles.noComment}>まだコメントはありません。最初のコメントを投稿してみましょう。</p>
-          )}
-          {comments.map((c) => {
-            const alreadyReported = reportedIds.has(c.id);
-            return (
-              <div key={c.id} style={styles.commentItem}>
-                <div style={styles.commentHead}>
-                  <span style={styles.commentName}>{c.display_name}</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={styles.commentTime}>{timeAgo(new Date(c.created_at).getTime())}</span>
-                    <button
-                      onClick={() => onReport(c.id)}
-                      disabled={alreadyReported}
-                      style={{
-                        ...styles.reportBtn,
-                        color: alreadyReported ? "#4A4A54" : "#6B6B78",
-                      }}
-                      aria-label="コメントを通報"
-                      title={alreadyReported ? "通報済み" : "不適切なコメントを通報"}
-                    >
-                      <Flag size={12} />
-                    </button>
-                  </div>
+/**
+ * クリップ一覧の右側に固定表示するコメントサイドパネル。
+ * コメントの購読はClipRow側で行っているため、ここでは親から渡されたデータを表示するだけ
+ * （同一clipへの二重購読を避けるため、自前でuseCommentsは呼ばない）。
+ */
+function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, reportedIds, onReport, onClose }) {
+  const { comments, submit, submitting, error } = commentsData ?? {
+    comments: [],
+    submit: () => {},
+    submitting: false,
+    error: null,
+  };
+  const [draft, setDraft] = useState("");
+  const [localError, setLocalError] = useState("");
+
+  function handleSubmit() {
+    const body = draft.trim();
+    if (!body) {
+      setLocalError("コメントを入力してください。");
+      return;
+    }
+    setLocalError("");
+    submit(body, nameDraft);
+    setDraft("");
+  }
+
+  return (
+    <div style={styles.commentSidebar}>
+      <div style={styles.commentSidebarHeader}>
+        <p style={styles.commentSidebarTitle}>{clip.title}</p>
+        <button onClick={onClose} style={styles.closeBtn} aria-label="コメントを閉じる">
+          <X size={18} />
+        </button>
+      </div>
+
+      <div style={styles.commentList}>
+        {comments.length === 0 && (
+          <p style={styles.noComment}>まだコメントはありません。最初のコメントを投稿してみましょう。</p>
+        )}
+        {comments.map((c) => {
+          const alreadyReported = reportedIds.has(c.id);
+          return (
+            <div key={c.id} style={styles.commentItem}>
+              <div style={styles.commentHead}>
+                <span style={styles.commentName}>{c.display_name}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={styles.commentTime}>{timeAgo(new Date(c.created_at).getTime())}</span>
+                  <button
+                    onClick={() => onReport(c.id)}
+                    disabled={alreadyReported}
+                    style={{
+                      ...styles.reportBtn,
+                      color: alreadyReported ? "#4A4A54" : "#6B6B78",
+                    }}
+                    aria-label="コメントを通報"
+                    title={alreadyReported ? "通報済み" : "不適切なコメントを通報"}
+                  >
+                    <Flag size={12} />
+                  </button>
                 </div>
-                <p style={styles.commentBody}>{c.body}</p>
               </div>
-            );
-          })}
-          <div style={styles.commentForm}>
-            <input
-              value={nameDraft}
-              onChange={(e) => onNameDraftChange(e.target.value)}
-              placeholder="名前（任意・空欄なら匿名）"
-              style={styles.nameInput}
-              maxLength={20}
-            />
-            <div style={styles.commentInputRow}>
-              <textarea
-                value={draft}
-                onChange={(e) => {
-                  setDraft(e.target.value);
-                  if (localError) setLocalError("");
-                }}
-                placeholder="このクリップについてコメント…"
-                style={styles.commentInput}
-                rows={2}
-                maxLength={280}
-              />
-              <button
-                onClick={handleSubmit}
-                style={styles.sendBtn}
-                aria-label="コメントを送信"
-                disabled={submitting}
-              >
-                <Send size={15} />
-              </button>
+              <p style={styles.commentBody}>{c.body}</p>
             </div>
-            {(localError || error) && (
-              <p style={styles.commentErrorText}>{localError || error}</p>
-            )}
-          </div>
+          );
+        })}
+      </div>
+
+      <div style={styles.commentForm}>
+        <input
+          value={nameDraft}
+          onChange={(e) => onNameDraftChange(e.target.value)}
+          placeholder="名前（任意・空欄なら匿名）"
+          style={styles.nameInput}
+          maxLength={20}
+        />
+        <div style={styles.commentInputRow}>
+          <textarea
+            value={draft}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              if (localError) setLocalError("");
+            }}
+            placeholder="このクリップについてコメント…"
+            style={styles.commentInput}
+            rows={2}
+            maxLength={280}
+          />
+          <button
+            onClick={handleSubmit}
+            style={styles.sendBtn}
+            aria-label="コメントを送信"
+            disabled={submitting}
+          >
+            <Send size={15} />
+          </button>
         </div>
-      )}
+        {(localError || error) && <p style={styles.commentErrorText}>{localError || error}</p>}
+      </div>
     </div>
   );
 }
@@ -265,7 +291,8 @@ export default function ClipRanking() {
   const { favorites, toggle: toggleFavorite } = useFavorites();
   const { broadcasters: topBroadcasters } = useTopBroadcasters(8);
 
-  const [openComments, setOpenComments] = useState({});
+  const [activeCommentClipId, setActiveCommentClipId] = useState(null);
+  const [commentsDataByClip, setCommentsDataByClip] = useState({});
   const [nameDraft, setNameDraft] = useState("");
   const [filter, setFilter] = useState("all"); // all | favorites
   const [searchQuery, setSearchQuery] = useState("");
@@ -277,8 +304,12 @@ export default function ClipRanking() {
   const { report: reportComment } = useCommentReport();
 
   function toggleComments(clipId) {
-    setOpenComments((prev) => ({ ...prev, [clipId]: !prev[clipId] }));
+    setActiveCommentClipId((prev) => (prev === clipId ? null : clipId));
   }
+
+  const handleCommentsUpdate = useCallback((clipId, data) => {
+    setCommentsDataByClip((prev) => ({ ...prev, [clipId]: data }));
+  }, []);
 
   function handleReport(commentId) {
     if (reportedIds.has(commentId)) return; // 二重通報を防止
@@ -456,12 +487,9 @@ export default function ClipRanking() {
               onVote={vote}
               isFav={favorites.has(clip.id)}
               onToggleFavorite={toggleFavorite}
-              open={!!openComments[clip.id]}
-              onToggleOpen={toggleComments}
-              nameDraft={nameDraft}
-              onNameDraftChange={setNameDraft}
-              reportedIds={reportedIds}
-              onReport={handleReport}
+              commentsActive={activeCommentClipId === clip.id}
+              onOpenComments={toggleComments}
+              onCommentsUpdate={handleCommentsUpdate}
             />
           );
         })}
@@ -470,6 +498,23 @@ export default function ClipRanking() {
       <footer style={styles.footer}>
         いいね・お気に入り・コメントはすべてのブラウザで共有されます。
       </footer>
+
+      {activeCommentClipId && (() => {
+        const activeClip = clips.find((c) => c.id === activeCommentClipId);
+        if (!activeClip) return null;
+        return (
+          <CommentSidebar
+            key={activeClip.id}
+            clip={activeClip}
+            commentsData={commentsDataByClip[activeClip.id]}
+            nameDraft={nameDraft}
+            onNameDraftChange={setNameDraft}
+            reportedIds={reportedIds}
+            onReport={handleReport}
+            onClose={() => setActiveCommentClipId(null)}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -662,13 +707,52 @@ const styles = {
     border: "none",
     borderRadius: 8,
   },
-  commentPanel: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTop: "1px solid #24242F",
+  commentSidebar: {
+    position: "fixed",
+    top: 0,
+    right: 0,
+    height: "100vh",
+    width: "min(380px, 100vw)",
+    background: "#1C1C26",
+    borderLeft: "1px solid #2E2E3A",
+    boxShadow: "-8px 0 24px rgba(0,0,0,0.4)",
+    zIndex: 50,
+    display: "flex",
+    flexDirection: "column",
+    padding: 20,
+  },
+  commentSidebarHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+    paddingBottom: 14,
+    marginBottom: 14,
+    borderBottom: "1px solid #24242F",
+  },
+  commentSidebarTitle: {
+    fontSize: 14,
+    fontWeight: 500,
+    color: "#EDEDF2",
+    margin: 0,
+    lineHeight: 1.4,
+  },
+  closeBtn: {
+    background: "transparent",
+    border: "none",
+    color: "#8A8A99",
+    padding: 2,
+    display: "flex",
+    alignItems: "center",
+    flexShrink: 0,
+  },
+  commentList: {
+    flex: 1,
+    overflowY: "auto",
     display: "flex",
     flexDirection: "column",
     gap: 10,
+    marginBottom: 14,
   },
   noComment: { fontSize: 13, color: "#6B6B78", margin: 0 },
   commentItem: { background: "#20202B", borderRadius: 8, padding: "8px 10px" },

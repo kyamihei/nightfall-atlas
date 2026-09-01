@@ -29,7 +29,8 @@ const TARGET_GAME_IDS = (Deno.env.get("TARGET_GAME_IDS") ?? "")
   .filter(Boolean);
 
 const STREAMS_PER_GAME = 100; // 1カテゴリあたり発見する配信の上限（Helixの最大値）
-const TOP_JA_STREAMS_LIMIT = 100; // ゲームカテゴリを問わない「日本語配信 視聴者数上位」の発見件数上限
+const TOP_JA_STREAMS_LIMIT = 400; // ゲームカテゴリを問わない「日本語配信 視聴者数上位」の発見件数上限（Helix1ページ最大100のためページネーションで積み上げる）
+const HELIX_STREAMS_PAGE_SIZE = 100; // Helix /streams の1ページあたり最大件数
 const BROADCASTER_STALE_DAYS = 30; // これより長く見つからない配信者は同期対象から外す
 
 interface TwitchClip {
@@ -93,22 +94,34 @@ async function discoverJapaneseBroadcasters(token: string, gameId: string): Prom
  * 拾えないため、この全体人気順の発見を別途行い、カテゴリ別発見の結果とマージする。
  */
 async function discoverTopJapaneseBroadcasters(token: string): Promise<TwitchStream[]> {
-  const url = new URL("https://api.twitch.tv/helix/streams");
-  url.searchParams.set("language", "ja");
-  url.searchParams.set("first", String(TOP_JA_STREAMS_LIMIT));
+  const results: TwitchStream[] = [];
+  let cursor: string | undefined;
 
-  const res = await fetch(url, {
-    headers: {
-      "Client-Id": TWITCH_CLIENT_ID,
-      Authorization: `Bearer ${token}`,
-    },
-  });
-  if (!res.ok) {
-    console.error(`日本語配信 人気順の発見に失敗: ${res.status}`);
-    return [];
+  while (results.length < TOP_JA_STREAMS_LIMIT) {
+    const url = new URL("https://api.twitch.tv/helix/streams");
+    url.searchParams.set("language", "ja");
+    url.searchParams.set("first", String(HELIX_STREAMS_PAGE_SIZE));
+    if (cursor) url.searchParams.set("after", cursor);
+
+    const res = await fetch(url, {
+      headers: {
+        "Client-Id": TWITCH_CLIENT_ID,
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (!res.ok) {
+      console.error(`日本語配信 人気順の発見に失敗: ${res.status}`);
+      break;
+    }
+    const data = await res.json();
+    const page = data.data as TwitchStream[];
+    results.push(...page);
+
+    cursor = data.pagination?.cursor;
+    if (!cursor || page.length === 0) break; // これ以上ページが無い（配信数が上限に満たない）
   }
-  const data = await res.json();
-  return data.data as TwitchStream[];
+
+  return results.slice(0, TOP_JA_STREAMS_LIMIT);
 }
 
 async function fetchClipsForBroadcaster(
