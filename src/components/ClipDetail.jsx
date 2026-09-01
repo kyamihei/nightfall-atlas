@@ -6,6 +6,7 @@ import {
   useReactions,
   useComments,
   useCommentReport,
+  useBroadcasterAvatars,
 } from "../lib/use-clip-ranking";
 
 function formatViews(n) {
@@ -38,6 +39,7 @@ export default function ClipDetail() {
   const { clip, loading, error } = useClip(id);
   const clipIds = clip ? [clip.id] : [];
   const { counts, myVotes, vote } = useReactions(clipIds);
+  const avatars = useBroadcasterAvatars(clip ? [clip.streamer] : []);
   const { comments, submit, submitting, error: commentError } = useComments(id);
   const { report: reportComment } = useCommentReport();
 
@@ -117,6 +119,11 @@ export default function ClipDetail() {
       </h1>
       <p style={styles.metaLine}>
         <Link to={`/broadcasters/${encodeURIComponent(clip.streamer)}`} style={styles.streamerLink}>
+          {avatars[clip.streamer] ? (
+            <img src={avatars[clip.streamer]} alt="" style={styles.rowAvatar} />
+          ) : (
+            <span style={styles.rowAvatarFallback} />
+          )}
           {clip.streamer}
         </Link>
         {" ・ "}
@@ -222,8 +229,8 @@ const styles = {
     minHeight: "100vh",
     background: "#14141B",
     color: "#EDEDF2",
-    padding: "28px 20px 60px",
-    maxWidth: 720,
+    padding: "28px 32px 60px",
+    maxWidth: 1000,
     margin: "0 auto",
   },
   loadingWrap: {
@@ -254,7 +261,17 @@ const styles = {
   },
   title: { fontSize: 22, fontWeight: 600, margin: "0 0 8px", lineHeight: 1.3 },
   metaLine: { fontSize: 13, color: "#8A8A99", margin: "0 0 18px" },
-  streamerLink: { color: "#EDEDF2", fontWeight: 500, textDecoration: "none" },
+  streamerLink: {
+    color: "#EDEDF2",
+    fontWeight: 500,
+    textDecoration: "none",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    verticalAlign: "middle",
+  },
+  rowAvatar: { width: 20, height: 20, borderRadius: "50%", objectFit: "cover" },
+  rowAvatarFallback: { width: 20, height: 20, borderRadius: "50%", background: "#20202B", display: "inline-block" },
   actions: { display: "flex", gap: 8, marginBottom: 28 },
   actionBtn: {
     display: "flex",

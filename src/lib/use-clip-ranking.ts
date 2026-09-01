@@ -431,6 +431,7 @@ export interface TopBroadcaster {
   total_views: number;
   clip_count: number;
   tag: string | null;
+  profile_image_url: string | null;
 }
 
 /** 人気配信者一覧（合計視聴回数順、ページネーションつき）。所属グループタグは手動設定時のみ入る */
@@ -461,6 +462,7 @@ export function useTopBroadcasters(limit = 20, offset = 0) {
 export interface BroadcasterProfile {
   clips: Clip[];
   tag: string | null;
+  avatarUrl: string | null;
   totalViews: number;
   clipCount: number;
 }
@@ -475,6 +477,7 @@ export function useBroadcasterProfile(
   const [profile, setProfile] = useState<BroadcasterProfile>({
     clips: [],
     tag: null,
+    avatarUrl: null,
     totalViews: 0,
     clipCount: 0,
   });
@@ -499,7 +502,7 @@ export function useBroadcasterProfile(
         clipsQuery,
         supabase
           .from("tracked_broadcasters")
-          .select("tag")
+          .select("tag, profile_image_url")
           .eq("broadcaster_name", streamer)
           .maybeSingle(),
       ]);
@@ -511,6 +514,7 @@ export function useBroadcasterProfile(
         setProfile({
           clips,
           tag: tagRes.data?.tag ?? null,
+          avatarUrl: tagRes.data?.profile_image_url ?? null,
           totalViews: clips.reduce((sum, c) => sum + c.view_count, 0),
           clipCount: clips.length,
         });
@@ -524,4 +528,41 @@ export function useBroadcasterProfile(
   }, [streamer, limit, period, referenceDate?.getTime()]);
 
   return { ...profile, loading, error };
+}
+
+/**
+ * 配信者名の配列から、アイコン画像URLをまとめて取得する（クリップ一覧・詳細ページ用）。
+ * clips.streamerはtracked_broadcasters.broadcaster_nameへの外部キーではないテキスト列なので、
+ * Supabaseの自動JOINは使えず、名前の配列でtracked_broadcastersを直接検索する。
+ */
+export function useBroadcasterAvatars(streamerNames: string[]) {
+  const [avatars, setAvatars] = useState<Record<string, string>>({});
+  const key = streamerNames.join("|");
+
+  useEffect(() => {
+    if (streamerNames.length === 0) {
+      setAvatars({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("tracked_broadcasters")
+        .select("broadcaster_name, profile_image_url")
+        .in("broadcaster_name", streamerNames)
+        .not("profile_image_url", "is", null);
+      if (cancelled) return;
+      const map: Record<string, string> = {};
+      for (const row of data ?? []) {
+        if (row.profile_image_url) map[row.broadcaster_name] = row.profile_image_url;
+      }
+      setAvatars(map);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  return avatars;
 }

@@ -40,6 +40,8 @@ const BROADCASTER_STALE_DAYS = 30; // これより長く見つからない配信
 const BACKFILL_START_DATE = new Date("2016-01-01T00:00:00Z"); // Twitchのクリップ機能の開始時期に合わせた起点
 const BACKFILL_BATCH_SIZE = 200; // 1回の実行でバックフィルする配信者数の上限（実行頻度は変えず、1回あたりの処理人数で調整する）
 const HELIX_CLIPS_PAGE_SIZE = 100; // Helix /clips の1ページあたり最大件数
+const HELIX_USERS_PAGE_SIZE = 100; // Helix /users の1リクエストあたり最大id数
+const AVATAR_BACKFILL_BATCH_SIZE = 500; // アイコン未取得の既存配信者を1回の実行で更新する上限（Get Usersは軽いのでまとめて処理する）
 const BACKFILL_MAX_PAGES = 500; // 暴走防止用の技術的な安全上限（50,000件相当。通常の配信者では到達しない想定）
 const RATE_LIMIT_RETRY_MAX = 3; // 429応答時のリトライ回数
 const RATE_LIMIT_DEFAULT_WAIT_MS = 10_000; // Ratelimit-Resetヘッダが無い場合のデフォルト待機時間
@@ -234,6 +236,35 @@ async function fetchBackfillClipsForBroadcaster(
   return { clips: results, completed: false };
 }
 
+/** Twitchのプロフィール画像URLをuser_idからまとめて取得する（Get Usersは1回最大100件） */
+async function fetchProfileImages(token: string, userIds: string[]): Promise<Map<string, string>> {
+  const uniqueIds = [...new Set(userIds)].filter(Boolean);
+  const map = new Map<string, string>();
+  if (uniqueIds.length === 0) return map;
+
+  for (let i = 0; i < uniqueIds.length; i += HELIX_USERS_PAGE_SIZE) {
+    const chunk = uniqueIds.slice(i, i + HELIX_USERS_PAGE_SIZE);
+    const url = new URL("https://api.twitch.tv/helix/users");
+    chunk.forEach((id) => url.searchParams.append("id", id));
+
+    const res = await fetch(url, {
+      headers: {
+        "Client-Id": TWITCH_CLIENT_ID,
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (!res.ok) {
+      console.error(`プロフィール画像の取得に失敗しました（${chunk.length}件分）: ${res.status}`);
+      continue;
+    }
+    const data = await res.json();
+    for (const u of data.data as { id: string; profile_image_url: string }[]) {
+      map.set(u.id, u.profile_image_url);
+    }
+  }
+  return map;
+}
+
 async function fetchGameNames(token: string, gameIds: string[]): Promise<Map<string, string>> {
   const uniqueIds = [...new Set(gameIds)].filter(Boolean);
   const map = new Map<string, string>();
@@ -285,15 +316,40 @@ async function main() {
   console.log(`新たに発見した配信者数: ${discovered.size}（うち人気順発見: ${topJaStreams.length}）`);
 
   if (discovered.size > 0) {
+    const avatars = await fetchProfileImages(token, [...discovered.keys()]);
     const rows = [...discovered.entries()].map(([broadcaster_id, broadcaster_name]) => ({
       broadcaster_id,
       broadcaster_name,
       last_seen_at: new Date().toISOString(),
+      profile_image_url: avatars.get(broadcaster_id) ?? null,
     }));
     const { error } = await supabase.from("tracked_broadcasters").upsert(rows, {
       onConflict: "broadcaster_id",
     });
     if (error) console.error("tracked_broadcastersのupsertに失敗:", error.message);
+  }
+
+  // 1b. 既存配信者のうち、まだアイコン画像URLを取得していない人をまとめて更新する
+  const { data: missingAvatarBroadcasters, error: avatarFetchErr } = await supabase
+    .from("tracked_broadcasters")
+    .select("broadcaster_id")
+    .is("profile_image_url", null)
+    .limit(AVATAR_BACKFILL_BATCH_SIZE);
+
+  if (avatarFetchErr) {
+    console.error("アイコン未取得配信者の取得に失敗しました:", avatarFetchErr.message);
+  } else if (missingAvatarBroadcasters && missingAvatarBroadcasters.length > 0) {
+    const ids = missingAvatarBroadcasters.map((b) => b.broadcaster_id);
+    const avatars = await fetchProfileImages(token, ids);
+    let updated = 0;
+    for (const [broadcaster_id, profile_image_url] of avatars) {
+      const { error } = await supabase
+        .from("tracked_broadcasters")
+        .update({ profile_image_url })
+        .eq("broadcaster_id", broadcaster_id);
+      if (!error) updated++;
+    }
+    console.log(`アイコン画像URLを${updated}/${ids.length}人分更新しました`);
   }
 
   // 2. 直近で見つかっている配信者（今回発見分＋過去分のうち一定期間内）のクリップを収集

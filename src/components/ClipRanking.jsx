@@ -8,6 +8,7 @@ import {
   useBroadcasterSearch,
   useBroadcasterRequest,
   useCommentReport,
+  useBroadcasterAvatars,
 } from "../lib/use-clip-ranking";
 
 const PERIOD_TABS = [
@@ -78,6 +79,7 @@ function ClipRow({
   commentsActive,
   onOpenComments,
   onCommentsUpdate,
+  avatarUrl,
 }) {
   // このクリップのコメント購読はここ1箇所のみで行い、サイドパネル用のデータは
   // onCommentsUpdate経由で親に伝える（同一clipへの二重購読はSupabase Realtimeがエラーになるため）
@@ -133,6 +135,11 @@ function ClipRow({
           </Link>
           <p style={styles.metaLine}>
             <Link to={`/broadcasters/${encodeURIComponent(clip.streamer)}`} style={styles.streamerLink}>
+              {avatarUrl ? (
+                <img src={avatarUrl} alt="" style={styles.rowAvatar} />
+              ) : (
+                <span style={styles.rowAvatarFallback} />
+              )}
               {clip.streamer}
             </Link>
             {" ・ ▶ "}{formatViews(clip.view_count)}回視聴
@@ -309,6 +316,8 @@ export default function ClipRanking() {
   );
   const clipIds = useMemo(() => clips.map((c) => c.id), [clips]);
   const { counts, myVotes, vote } = useReactions(clipIds);
+  const streamerNames = useMemo(() => [...new Set(clips.map((c) => c.streamer))], [clips]);
+  const avatars = useBroadcasterAvatars(streamerNames);
 
   const [activeCommentClipId, setActiveCommentClipId] = useState(null);
   const [commentsDataByClip, setCommentsDataByClip] = useState({});
@@ -501,6 +510,7 @@ export default function ClipRanking() {
               commentsActive={activeCommentClipId === clip.id}
               onOpenComments={toggleComments}
               onCommentsUpdate={handleCommentsUpdate}
+              avatarUrl={avatars[clip.streamer]}
             />
           );
         })}
@@ -559,8 +569,8 @@ const styles = {
     minHeight: "100vh",
     background: "#14141B",
     color: "#EDEDF2",
-    padding: "28px 20px 40px",
-    maxWidth: 720,
+    padding: "28px 32px 40px",
+    maxWidth: 1200,
     margin: "0 auto",
   },
   loadingWrap: {
@@ -726,7 +736,17 @@ const styles = {
   },
   infoCol: { flex: 1, minWidth: 0 },
   clipTitleLink: { textDecoration: "none", color: "inherit" },
-  streamerLink: { color: "#EDEDF2", textDecoration: "none", fontWeight: 500 },
+  streamerLink: {
+    color: "#EDEDF2",
+    textDecoration: "none",
+    fontWeight: 500,
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+    verticalAlign: "middle",
+  },
+  rowAvatar: { width: 16, height: 16, borderRadius: "50%", objectFit: "cover" },
+  rowAvatarFallback: { width: 16, height: 16, borderRadius: "50%", background: "#20202B", display: "inline-block" },
   clipTitle: {
     fontSize: 15,
     fontWeight: 500,

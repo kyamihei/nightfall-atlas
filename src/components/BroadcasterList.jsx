@@ -59,6 +59,11 @@ export default function BroadcasterList() {
             {visible.map((b, i) => (
               <Link key={b.streamer} to={`/broadcasters/${encodeURIComponent(b.streamer)}`} style={styles.row}>
                 <div style={styles.rankNum}>{String((page - 1) * PAGE_SIZE + i + 1).padStart(2, "0")}</div>
+                {b.profile_image_url ? (
+                  <img src={b.profile_image_url} alt="" style={styles.avatar} />
+                ) : (
+                  <div style={styles.avatarFallback} />
+                )}
                 <div style={styles.infoCol}>
                   <div style={styles.nameRow}>
                     <p style={styles.name}>{b.streamer}</p>
@@ -104,8 +109,8 @@ const styles = {
     minHeight: "100vh",
     background: "#14141B",
     color: "#EDEDF2",
-    padding: "28px 20px 40px",
-    maxWidth: 720,
+    padding: "28px 32px 40px",
+    maxWidth: 1200,
     margin: "0 auto",
   },
   header: {
@@ -162,6 +167,8 @@ const styles = {
     textDecoration: "none",
   },
   rankNum: { fontSize: 15, fontWeight: 600, color: "#565660", width: 28, flexShrink: 0 },
+  avatar: { width: 36, height: 36, borderRadius: "50%", objectFit: "cover", flexShrink: 0 },
+  avatarFallback: { width: 36, height: 36, borderRadius: "50%", background: "#20202B", flexShrink: 0 },
   infoCol: { flex: 1, minWidth: 0 },
   nameRow: { display: "flex", alignItems: "center", gap: 8 },
   name: { fontSize: 14.5, fontWeight: 500, margin: 0, color: "#EDEDF2" },

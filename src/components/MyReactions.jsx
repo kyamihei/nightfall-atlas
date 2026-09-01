@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Loader2 } from "lucide-react";
-import { useMyReactions } from "../lib/use-clip-ranking";
+import { useMyReactions, useBroadcasterAvatars } from "../lib/use-clip-ranking";
 
 function formatViews(n) {
   return new Intl.NumberFormat("ja-JP").format(n);
@@ -22,6 +22,8 @@ export default function MyReactions() {
   const [tab, setTab] = useState("like"); // like | dislike
 
   const clips = tab === "like" ? likedClips : dislikedClips;
+  const streamerNames = useMemo(() => [...new Set(clips.map((c) => c.streamer))], [clips]);
+  const avatars = useBroadcasterAvatars(streamerNames);
 
   return (
     <div style={styles.page}>
@@ -82,6 +84,11 @@ export default function MyReactions() {
               <div style={styles.infoCol}>
                 <p className="clip-title-font" style={styles.clipTitle}>{clip.title}</p>
                 <p style={styles.metaLine}>
+                  {avatars[clip.streamer] ? (
+                    <img src={avatars[clip.streamer]} alt="" style={styles.rowAvatar} />
+                  ) : (
+                    <span style={styles.rowAvatarFallback} />
+                  )}
                   {clip.streamer} ・ {clip.game} ・ ▶ {formatViews(clip.view_count)}回視聴
                 </p>
               </div>
@@ -99,8 +106,8 @@ const styles = {
     minHeight: "100vh",
     background: "#14141B",
     color: "#EDEDF2",
-    padding: "28px 20px 40px",
-    maxWidth: 720,
+    padding: "28px 32px 40px",
+    maxWidth: 1200,
     margin: "0 auto",
   },
   loadingWrap: {
@@ -178,9 +185,14 @@ const styles = {
     fontSize: 12,
     color: "#6B6B78",
     margin: 0,
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
   },
+  rowAvatar: { width: 16, height: 16, borderRadius: "50%", objectFit: "cover", flexShrink: 0 },
+  rowAvatarFallback: { width: 16, height: 16, borderRadius: "50%", background: "#20202B", flexShrink: 0 },
   reactedAt: { fontSize: 11.5, color: "#5A5A66", flexShrink: 0 },
 };

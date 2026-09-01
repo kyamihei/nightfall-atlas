@@ -39,7 +39,7 @@ export default function BroadcasterDetail() {
   const streamer = decodeURIComponent(name);
   const [period, setPeriod] = useState("all"); // all | year | month | day
   const [selectedDay, setSelectedDay] = useState(() => new Date());
-  const { clips, tag, totalViews, clipCount, loading, error } = useBroadcasterProfile(
+  const { clips, tag, avatarUrl, totalViews, clipCount, loading, error } = useBroadcasterProfile(
     streamer,
     50,
     period,
@@ -71,15 +71,24 @@ export default function BroadcasterDetail() {
       </Link>
 
       <header style={styles.header}>
-        <div style={styles.nameRow}>
-          <h1 className="clip-title-font" style={styles.name}>
-            {streamer}
-          </h1>
-          {tag && <span style={styles.tagBadge}>{tag}</span>}
+        <div style={styles.headerRow}>
+          {avatarUrl ? (
+            <img src={avatarUrl} alt="" style={styles.avatar} />
+          ) : (
+            <div style={styles.avatarFallback} />
+          )}
+          <div>
+            <div style={styles.nameRow}>
+              <h1 className="clip-title-font" style={styles.name}>
+                {streamer}
+              </h1>
+              {tag && <span style={styles.tagBadge}>{tag}</span>}
+            </div>
+            <p style={styles.stats}>
+              合計 {formatViews(totalViews)}回視聴 ・ クリップ{clipCount}件
+            </p>
+          </div>
         </div>
-        <p style={styles.stats}>
-          合計 {formatViews(totalViews)}回視聴 ・ クリップ{clipCount}件
-        </p>
       </header>
 
       <div style={styles.periodTabs}>
@@ -142,8 +151,8 @@ const styles = {
     minHeight: "100vh",
     background: "#14141B",
     color: "#EDEDF2",
-    padding: "28px 20px 40px",
-    maxWidth: 720,
+    padding: "28px 32px 40px",
+    maxWidth: 1200,
     margin: "0 auto",
   },
   loadingWrap: {
@@ -164,6 +173,9 @@ const styles = {
     marginBottom: 18,
   },
   header: { borderBottom: "1px solid #24242F", paddingBottom: 18, marginBottom: 18 },
+  headerRow: { display: "flex", alignItems: "center", gap: 16 },
+  avatar: { width: 64, height: 64, borderRadius: "50%", objectFit: "cover", flexShrink: 0 },
+  avatarFallback: { width: 64, height: 64, borderRadius: "50%", background: "#20202B", flexShrink: 0 },
   periodTabs: { display: "flex", gap: 6, marginBottom: 12 },
   dayTabs: { display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 16 },
   tab: {
