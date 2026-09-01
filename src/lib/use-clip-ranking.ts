@@ -63,9 +63,10 @@ export function getPeriodRange(period: Period, referenceDate: Date = new Date())
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
-/** 日次ランキングのクリップ一覧を取得（view_count降順、期間指定つき） */
-export function useClips(limit = 20, period: Period = "all", referenceDate?: Date) {
+/** 日次ランキングのクリップ一覧を取得（view_count降順、期間指定・ページネーションつき） */
+export function useClips(limit = 20, period: Period = "all", referenceDate?: Date, page = 1) {
   const [clips, setClips] = useState<Clip[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -74,21 +75,24 @@ export function useClips(limit = 20, period: Period = "all", referenceDate?: Dat
     (async () => {
       setLoading(true);
       const { start, end } = getPeriodRange(period, referenceDate);
+      const from = (page - 1) * limit;
+      const to = from + limit - 1;
       let query = supabase
         .from("clips")
-        .select("id, title, streamer, game, view_count, thumbnail_url, twitch_created_at")
+        .select("id, title, streamer, game, view_count, thumbnail_url, twitch_created_at", { count: "exact" })
         .order("view_count", { ascending: false })
-        .limit(limit);
+        .range(from, to);
 
       if (start) query = query.gte("twitch_created_at", start);
       if (end) query = query.lt("twitch_created_at", end);
 
-      const { data, error } = await query;
+      const { data, error, count } = await query;
       if (cancelled) return;
       if (error) {
         setError("クリップの取得に失敗しました");
       } else {
         setClips(data ?? []);
+        setTotalCount(count ?? 0);
         setError(null);
       }
       setLoading(false);
@@ -96,9 +100,9 @@ export function useClips(limit = 20, period: Period = "all", referenceDate?: Dat
     return () => {
       cancelled = true;
     };
-  }, [limit, period, referenceDate?.getTime()]);
+  }, [limit, period, referenceDate?.getTime(), page]);
 
-  return { clips, loading, error };
+  return { clips, loading, error, totalCount };
 }
 
 /**
@@ -378,18 +382,21 @@ export interface TopBroadcaster {
   streamer: string;
   total_views: number;
   clip_count: number;
+  tag: string | null;
 }
 
-/** 人気配信者一覧（合計視聴回数順）。tw-clipの「登録ユーザー一覧」に相当 */
-export function useTopBroadcasters(limit = 20) {
+/** 人気配信者一覧（合計視聴回数順、ページネーションつき）。所属グループタグは手動設定時のみ入る */
+export function useTopBroadcasters(limit = 20, offset = 0) {
   const [broadcasters, setBroadcasters] = useState<TopBroadcaster[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setLoading(true);
       const { data, error } = await supabase.rpc("get_top_broadcasters", {
         broadcaster_limit: limit,
+        broadcaster_offset: offset,
       });
       if (cancelled) return;
       if (!error) setBroadcasters(data ?? []);
@@ -398,7 +405,7 @@ export function useTopBroadcasters(limit = 20) {
     return () => {
       cancelled = true;
     };
-  }, [limit]);
+  }, [limit, offset]);
 
   return { broadcasters, loading };
 }

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Heart, ThumbsDown, Star, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Heart, ThumbsDown, Star, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, Users } from "lucide-react";
 import {
   useClips,
   useReactions,
@@ -15,8 +16,29 @@ const PERIOD_TABS = [
   { value: "all", label: "全期間" },
   { value: "year", label: "今年" },
   { value: "month", label: "今月" },
-  { value: "day", label: "今日" },
+  { value: "day", label: "日別" },
 ];
+
+const WEEKDAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
+
+/** 今日を含む過去7日分の日付を新しい順で返す（日別タブの選択肢用） */
+function getLastSevenDays() {
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    days.push(d);
+  }
+  return days;
+}
+
+function formatDayLabel(date) {
+  return `${date.getMonth() + 1}/${date.getDate()}(${WEEKDAY_LABELS[date.getDay()]})`;
+}
+
+function isSameDay(a, b) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
 
 const TAG_COLORS = {
   coral: { bg: "#3A241D", text: "#F0997B" },
@@ -283,9 +305,18 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
   );
 }
 
+const PAGE_SIZE = 20;
+
 export default function ClipRanking() {
   const [period, setPeriod] = useState("all"); // all | year | month | day
-  const { clips, loading, error: clipsError } = useClips(20, period);
+  const [selectedDay, setSelectedDay] = useState(() => new Date());
+  const [page, setPage] = useState(1);
+  const { clips, loading, error: clipsError, totalCount } = useClips(
+    PAGE_SIZE,
+    period,
+    period === "day" ? selectedDay : undefined,
+    page,
+  );
   const clipIds = useMemo(() => clips.map((c) => c.id), [clips]);
   const { counts, myVotes, vote } = useReactions(clipIds);
   const { favorites, toggle: toggleFavorite } = useFavorites();
@@ -302,6 +333,11 @@ export default function ClipRanking() {
   const { results: broadcasterResults, searching: broadcasterSearching } = useBroadcasterSearch(searchQuery);
   const { request: requestBroadcaster, submitting: requesting, result: requestResult } = useBroadcasterRequest();
   const { report: reportComment } = useCommentReport();
+
+  // 期間・日付・検索条件が変わったら1ページ目に戻す（違うページに条件が引き継がれて空表示になるのを防ぐ）
+  useEffect(() => {
+    setPage(1);
+  }, [period, selectedDay, searchQuery]);
 
   function toggleComments(clipId) {
     setActiveCommentClipId((prev) => (prev === clipId ? null : clipId));
@@ -366,6 +402,10 @@ export default function ClipRanking() {
           <p style={styles.tagline}>視聴回数順のクリップランキング</p>
         </div>
         <div style={styles.headerControls}>
+          <Link to="/broadcasters" style={styles.broadcastersLink}>
+            <Users size={13} />
+            配信者一覧
+          </Link>
           <div style={styles.searchBox}>
             <Search size={14} color="#6B6B78" />
             <input
@@ -403,6 +443,20 @@ export default function ClipRanking() {
           </button>
         ))}
       </div>
+
+      {period === "day" && (
+        <div style={styles.dayTabs}>
+          {getLastSevenDays().map((d) => (
+            <button
+              key={d.toDateString()}
+              onClick={() => setSelectedDay(d)}
+              style={isSameDay(d, selectedDay) ? styles.tabActive : styles.tab}
+            >
+              {formatDayLabel(d)}
+            </button>
+          ))}
+        </div>
+      )}
 
       {!searchQuery.trim() && topBroadcasters.length > 0 && (
         <div style={styles.broadcasterChips}>
@@ -495,6 +549,30 @@ export default function ClipRanking() {
         })}
       </div>
 
+      {filter !== "favorites" && !searchQuery.trim() && totalCount > PAGE_SIZE && (
+        <div style={styles.pagination}>
+          <button
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page <= 1}
+            style={{ ...styles.pageBtn, opacity: page <= 1 ? 0.4 : 1 }}
+            aria-label="前のページ"
+          >
+            <ChevronLeft size={15} />
+          </button>
+          <span style={styles.pageInfo}>
+            {page} / {Math.ceil(totalCount / PAGE_SIZE)}
+          </span>
+          <button
+            onClick={() => setPage((p) => (p * PAGE_SIZE < totalCount ? p + 1 : p))}
+            disabled={page * PAGE_SIZE >= totalCount}
+            style={{ ...styles.pageBtn, opacity: page * PAGE_SIZE >= totalCount ? 0.4 : 1 }}
+            aria-label="次のページ"
+          >
+            <ChevronRight size={15} />
+          </button>
+        </div>
+      )}
+
       <footer style={styles.footer}>
         いいね・お気に入り・コメントはすべてのブラウザで共有されます。
       </footer>
@@ -548,6 +626,14 @@ const styles = {
     marginBottom: 20,
   },
   headerControls: { display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 },
+  broadcastersLink: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+    color: "#8A8A99",
+    fontSize: 12.5,
+    textDecoration: "none",
+  },
   searchBox: {
     display: "flex",
     alignItems: "center",
@@ -596,6 +682,24 @@ const styles = {
     fontWeight: 500,
   },
   periodTabs: { display: "flex", gap: 6, marginBottom: 16 },
+  dayTabs: { display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 16 },
+  pagination: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 14,
+    marginTop: 20,
+  },
+  pageBtn: {
+    background: "#1C1C26",
+    border: "1px solid #2E2E3A",
+    color: "#EDEDF2",
+    borderRadius: 8,
+    padding: "6px 10px",
+    display: "flex",
+    alignItems: "center",
+  },
+  pageInfo: { fontSize: 13, color: "#8A8A99" },
   broadcasterChips: { display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 20 },
   chip: {
     background: "#1C1C26",
