@@ -35,11 +35,30 @@ const BROADCASTER_STALE_DAYS = 30; // これより長く見つからない配信
 
 // バックフィル（新規配信者の過去分クリップの遡及取得）関連の設定。
 // Helixの/clipsはstarted_at/ended_atを省略すると直近2週間分しか返さないため、
-// 「全期間」に近い蓄積をするには明示的に広い期間を指定して取得する必要がある。
-const BACKFILL_CLIP_LIMIT = 300; // 配信者1人あたりバックフィルする上限件数
-const BACKFILL_LOOKBACK_DAYS = 730; // バックフィル対象とする過去の遡及期間（約2年）
-const BACKFILL_BATCH_SIZE = 50; // 1回の実行でバックフィルする配信者数の上限（レート制限・実行時間対策で複数日に分散する）
+// 「全期間」の蓄積をするには明示的に広い期間を指定して取得する必要がある。
+// 件数上限は設けず、配信者の投稿履歴を最後まで（カーソルが尽きるまで）取得する。
+const BACKFILL_START_DATE = new Date("2016-01-01T00:00:00Z"); // Twitchのクリップ機能の開始時期に合わせた起点
+const BACKFILL_BATCH_SIZE = 20; // 1回の実行でバックフィルする配信者数の上限（件数無制限化により1人あたりのコストが増えたため縮小）
 const HELIX_CLIPS_PAGE_SIZE = 100; // Helix /clips の1ページあたり最大件数
+const BACKFILL_MAX_PAGES = 500; // 暴走防止用の技術的な安全上限（50,000件相当。通常の配信者では到達しない想定）
+const RATE_LIMIT_RETRY_MAX = 3; // 429応答時のリトライ回数
+const RATE_LIMIT_DEFAULT_WAIT_MS = 10_000; // Ratelimit-Resetヘッダが無い場合のデフォルト待機時間
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** 429応答時にRatelimit-Resetヘッダを見て、リセットまで待つ（無ければデフォルト秒数待つ） */
+async function waitForRateLimitReset(res: Response) {
+  const resetHeader = res.headers.get("Ratelimit-Reset");
+  if (resetHeader) {
+    const resetAtMs = Number(resetHeader) * 1000;
+    const waitMs = Math.max(0, resetAtMs - Date.now()) + 500;
+    await sleep(waitMs);
+  } else {
+    await sleep(RATE_LIMIT_DEFAULT_WAIT_MS);
+  }
+}
 
 interface TwitchClip {
   id: string;
@@ -159,45 +178,60 @@ async function fetchClipsForBroadcaster(
 }
 
 /**
- * 新規配信者の過去分クリップを遡及取得する（バックフィル）。
- * started_at/ended_atを明示的に広く指定し、ページネーションで最大BACKFILL_CLIP_LIMIT件まで積み上げる。
- * 注: Twitchはこの範囲内での並び順を保証しないため、必ずしも「視聴回数上位」から順に
- * 取得できるとは限らない（取得漏れの可能性はあるが、24時間分のみだった従来よりは大幅に広い）。
+ * 新規配信者の過去分クリップを、投稿履歴の最後まで遡及取得する（バックフィル、件数上限なし）。
+ * started_at/ended_atを明示的に広く（2016年〜現在）指定し、カーソルが尽きるまでページネーションする。
+ * 429（レート制限）が返ってきた場合はRatelimit-Resetまで待って同じページをリトライする。
+ * 途中で回復不能なエラーが出た場合はcompleted=falseを返し、呼び出し側でbackfilled_atを
+ * 記録しない（＝完了扱いにしない）ことで、次回実行時に続きから再試行できるようにする。
  */
-async function fetchBackfillClipsForBroadcaster(token: string, broadcasterId: string): Promise<TwitchClip[]> {
+async function fetchBackfillClipsForBroadcaster(
+  token: string,
+  broadcasterId: string,
+): Promise<{ clips: TwitchClip[]; completed: boolean }> {
   const endedAt = new Date();
-  const startedAt = new Date(endedAt.getTime() - BACKFILL_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
-
   const results: TwitchClip[] = [];
   let cursor: string | undefined;
 
-  while (results.length < BACKFILL_CLIP_LIMIT) {
+  for (let page = 0; page < BACKFILL_MAX_PAGES; page++) {
     const url = new URL("https://api.twitch.tv/helix/clips");
     url.searchParams.set("broadcaster_id", broadcasterId);
-    url.searchParams.set("started_at", startedAt.toISOString());
+    url.searchParams.set("started_at", BACKFILL_START_DATE.toISOString());
     url.searchParams.set("ended_at", endedAt.toISOString());
     url.searchParams.set("first", String(HELIX_CLIPS_PAGE_SIZE));
     if (cursor) url.searchParams.set("after", cursor);
 
-    const res = await fetch(url, {
-      headers: {
-        "Client-Id": TWITCH_CLIENT_ID,
-        Authorization: `Bearer ${token}`,
-      },
-    });
-    if (!res.ok) {
-      console.error(`broadcaster_id=${broadcasterId} のバックフィル取得に失敗: ${res.status}`);
-      break;
+    let res: Response | null = null;
+    for (let attempt = 0; attempt <= RATE_LIMIT_RETRY_MAX; attempt++) {
+      res = await fetch(url, {
+        headers: {
+          "Client-Id": TWITCH_CLIENT_ID,
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (res.status !== 429) break;
+      if (attempt < RATE_LIMIT_RETRY_MAX) {
+        console.log(`broadcaster_id=${broadcasterId} レート制限、待機してリトライします（${attempt + 1}回目）`);
+        await waitForRateLimitReset(res);
+      }
     }
+
+    if (!res || !res.ok) {
+      console.error(`broadcaster_id=${broadcasterId} のバックフィル取得に失敗: ${res?.status}`);
+      return { clips: results, completed: false };
+    }
+
     const data = await res.json();
-    const page = data.data as TwitchClip[];
-    results.push(...page);
+    const pageClips = data.data as TwitchClip[];
+    results.push(...pageClips);
 
     cursor = data.pagination?.cursor;
-    if (!cursor || page.length === 0) break;
+    if (!cursor || pageClips.length === 0) {
+      return { clips: results, completed: true };
+    }
   }
 
-  return results.slice(0, BACKFILL_CLIP_LIMIT);
+  console.error(`broadcaster_id=${broadcasterId} は安全上限(${BACKFILL_MAX_PAGES}ページ)に到達したため打ち切りました`);
+  return { clips: results, completed: false };
 }
 
 async function fetchGameNames(token: string, gameIds: string[]): Promise<Map<string, string>> {
@@ -301,18 +335,26 @@ async function main() {
     console.error("バックフィル対象の取得に失敗しました:", backfillFetchErr.message);
   } else if (backfillTargets && backfillTargets.length > 0) {
     let backfillClipCount = 0;
+    let completedCount = 0;
     for (const { broadcaster_id } of backfillTargets) {
-      const clips = await fetchBackfillClipsForBroadcaster(token, broadcaster_id);
+      const { clips, completed } = await fetchBackfillClipsForBroadcaster(token, broadcaster_id);
       allClips.push(...clips);
       backfillClipCount += clips.length;
 
-      const { error: markErr } = await supabase
-        .from("tracked_broadcasters")
-        .update({ backfilled_at: new Date().toISOString() })
-        .eq("broadcaster_id", broadcaster_id);
-      if (markErr) console.error(`broadcaster_id=${broadcaster_id} のbackfilled_at更新に失敗:`, markErr.message);
+      if (completed) {
+        completedCount++;
+        const { error: markErr } = await supabase
+          .from("tracked_broadcasters")
+          .update({ backfilled_at: new Date().toISOString() })
+          .eq("broadcaster_id", broadcaster_id);
+        if (markErr) console.error(`broadcaster_id=${broadcaster_id} のbackfilled_at更新に失敗:`, markErr.message);
+      } else {
+        console.log(`broadcaster_id=${broadcaster_id} は未完了のため次回実行時に再試行します`);
+      }
     }
-    console.log(`バックフィル対象: ${backfillTargets.length}人、取得クリップ数: ${backfillClipCount}`);
+    console.log(
+      `バックフィル対象: ${backfillTargets.length}人、完了: ${completedCount}人、取得クリップ数: ${backfillClipCount}`,
+    );
   } else {
     console.log("バックフィル対象の配信者はいません（全員処理済み）");
   }
