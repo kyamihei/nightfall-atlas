@@ -207,34 +207,50 @@ export function useReactions(clipIds: string[]) {
   return { counts, myVotes, vote };
 }
 
-/** お気に入りの取得とトグル */
-export function useFavorites() {
-  const [favorites, setFavorites] = useState<Set<string>>(new Set());
+export interface ReactedClip extends Clip {
+  reactedAt: string;
+}
+
+/**
+ * 自分がいいね／よくないねしたクリップの一覧を取得する。
+ * reactionsテーブルをclipsとJOIN（Supabaseの外部キーに基づく自動リレーション）して、
+ * クリップ情報ごと一度に取得する。
+ */
+export function useMyReactions() {
+  const [likedClips, setLikedClips] = useState<ReactedClip[]>([]);
+  const [dislikedClips, setDislikedClips] = useState<ReactedClip[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
+    setLoading(true);
     const user = await ensureAnonymousSession();
-    const { data } = await supabase.from("favorites").select("clip_id").eq("anon_id", user.id);
-    setFavorites(new Set((data ?? []).map((r) => r.clip_id)));
+    const { data, error } = await supabase
+      .from("reactions")
+      .select(
+        "type, created_at, clips(id, title, streamer, game, view_count, thumbnail_url, twitch_created_at)",
+      )
+      .eq("anon_id", user.id)
+      .order("created_at", { ascending: false });
+
+    if (!error && data) {
+      const liked: ReactedClip[] = [];
+      const disliked: ReactedClip[] = [];
+      for (const row of data as unknown as { type: string; created_at: string; clips: Clip | null }[]) {
+        if (!row.clips) continue; // クリップが削除されている場合はスキップ
+        const entry: ReactedClip = { ...row.clips, reactedAt: row.created_at };
+        (row.type === "like" ? liked : disliked).push(entry);
+      }
+      setLikedClips(liked);
+      setDislikedClips(disliked);
+    }
+    setLoading(false);
   }, []);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
 
-  const toggle = useCallback(
-    async (clipId: string) => {
-      const user = await ensureAnonymousSession();
-      if (favorites.has(clipId)) {
-        await supabase.from("favorites").delete().eq("clip_id", clipId).eq("anon_id", user.id);
-      } else {
-        await supabase.from("favorites").insert({ clip_id: clipId, anon_id: user.id });
-      }
-      await refresh();
-    },
-    [favorites, refresh],
-  );
-
-  return { favorites, toggle };
+  return { likedClips, dislikedClips, loading, refresh };
 }
 
 /**

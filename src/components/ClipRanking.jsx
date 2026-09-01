@@ -1,10 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Heart, ThumbsDown, Star, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, Users } from "lucide-react";
+import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, Users, ListChecks } from "lucide-react";
 import {
   useClips,
   useReactions,
-  useFavorites,
   useComments,
   useBroadcasterSearch,
   useBroadcasterRequest,
@@ -76,8 +75,6 @@ function ClipRow({
   dislikes,
   myVote,
   onVote,
-  isFav,
-  onToggleFavorite,
   commentsActive,
   onOpenComments,
   onCommentsUpdate,
@@ -166,17 +163,6 @@ function ClipRow({
           >
             <ThumbsDown size={15} fill={myVote === "dislike" ? "#4DD8FF" : "none"} />
             {dislikes}
-          </button>
-          <button
-            onClick={() => onToggleFavorite(clip.id)}
-            style={{
-              ...styles.actionBtn,
-              color: isFav ? "#FFC857" : "#8A8A99",
-              borderColor: isFav ? "#FFC85755" : "#2E2E3A",
-            }}
-            aria-label="お気に入り登録"
-          >
-            <Star size={15} fill={isFav ? "#FFC857" : "none"} />
           </button>
           <button
             onClick={() => onOpenComments(clip.id)}
@@ -323,12 +309,10 @@ export default function ClipRanking() {
   );
   const clipIds = useMemo(() => clips.map((c) => c.id), [clips]);
   const { counts, myVotes, vote } = useReactions(clipIds);
-  const { favorites, toggle: toggleFavorite } = useFavorites();
 
   const [activeCommentClipId, setActiveCommentClipId] = useState(null);
   const [commentsDataByClip, setCommentsDataByClip] = useState({});
   const [nameDraft, setNameDraft] = useState("");
-  const [filter, setFilter] = useState("all"); // all | favorites
   const [searchQuery, setSearchQuery] = useState("");
   const [requestDraft, setRequestDraft] = useState("");
   const [reportedIds, setReportedIds] = useState(new Set());
@@ -374,7 +358,6 @@ export default function ClipRanking() {
 
   const rankedClips = clips.map((c, i) => ({ ...c, rank: i + 1 }));
   const visibleClips = rankedClips.filter((c) => {
-    if (filter === "favorites" && !favorites.has(c.id)) return false;
     if (searchQuery.trim() && !c.streamer.toLowerCase().includes(searchQuery.trim().toLowerCase())) {
       return false;
     }
@@ -405,10 +388,16 @@ export default function ClipRanking() {
           <p style={styles.tagline}>視聴回数順のクリップランキング</p>
         </div>
         <div style={styles.headerControls}>
-          <Link to="/broadcasters" style={styles.broadcastersLink}>
-            <Users size={13} />
-            配信者一覧
-          </Link>
+          <div style={styles.headerLinks}>
+            <Link to="/broadcasters" style={styles.broadcastersLink}>
+              <Users size={13} />
+              配信者一覧
+            </Link>
+            <Link to="/my-reactions" style={styles.broadcastersLink}>
+              <ListChecks size={13} />
+              評価した動画
+            </Link>
+          </div>
           <div style={styles.searchBox}>
             <Search size={14} color="#6B6B78" />
             <input
@@ -417,20 +406,6 @@ export default function ClipRanking() {
               placeholder="配信者名で検索…"
               style={styles.searchInput}
             />
-          </div>
-          <div style={styles.filterTabs}>
-            <button
-              onClick={() => setFilter("all")}
-              style={filter === "all" ? styles.tabActive : styles.tab}
-            >
-              すべて
-            </button>
-            <button
-              onClick={() => setFilter("favorites")}
-              style={filter === "favorites" ? styles.tabActive : styles.tab}
-            >
-              お気に入り（{favorites.size}）
-            </button>
           </div>
         </div>
       </header>
@@ -465,11 +440,7 @@ export default function ClipRanking() {
 
       <div style={styles.list}>
         {visibleClips.length === 0 && !showNoResultRequest && (
-          <div style={styles.emptyState}>
-            {filter === "favorites"
-              ? "お気に入りに登録したクリップはまだありません。"
-              : "まだクリップがありません。"}
-          </div>
+          <div style={styles.emptyState}>まだクリップがありません。</div>
         )}
         {showNoResultRequest && (
           <div style={styles.requestCard}>
@@ -527,8 +498,6 @@ export default function ClipRanking() {
               dislikes={stats.dislikes}
               myVote={myVotes[clip.id]}
               onVote={vote}
-              isFav={favorites.has(clip.id)}
-              onToggleFavorite={toggleFavorite}
               commentsActive={activeCommentClipId === clip.id}
               onOpenComments={toggleComments}
               onCommentsUpdate={handleCommentsUpdate}
@@ -537,7 +506,7 @@ export default function ClipRanking() {
         })}
       </div>
 
-      {filter !== "favorites" && !searchQuery.trim() && totalCount > PAGE_SIZE && (
+      {!searchQuery.trim() && totalCount > PAGE_SIZE && (
         <div style={styles.pagination}>
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
@@ -562,7 +531,7 @@ export default function ClipRanking() {
       )}
 
       <footer style={styles.footer}>
-        いいね・お気に入り・コメントはすべてのブラウザで共有されます。
+        いいね・よくないね・コメントはすべてのブラウザで共有されます。
       </footer>
 
       {activeCommentClipId && (() => {
@@ -614,6 +583,7 @@ const styles = {
     marginBottom: 20,
   },
   headerControls: { display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 },
+  headerLinks: { display: "flex", gap: 14 },
   broadcastersLink: {
     display: "inline-flex",
     alignItems: "center",
@@ -651,7 +621,6 @@ const styles = {
   eyebrow: { fontSize: 12, color: "#9797A6", letterSpacing: 0.3 },
   h1: { fontSize: 30, fontWeight: 600, margin: "0 0 6px", letterSpacing: 0.5 },
   tagline: { fontSize: 13, color: "#6B6B78", margin: 0 },
-  filterTabs: { display: "flex", gap: 6 },
   tab: {
     background: "transparent",
     border: "1px solid #2E2E3A",

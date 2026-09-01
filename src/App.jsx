@@ -3,6 +3,7 @@ import ClipRanking from "./components/ClipRanking";
 import BroadcasterList from "./components/BroadcasterList";
 import ClipDetail from "./components/ClipDetail";
 import BroadcasterDetail from "./components/BroadcasterDetail";
+import MyReactions from "./components/MyReactions";
 
 export default function App() {
   return (
@@ -12,6 +13,7 @@ export default function App() {
         <Route path="/broadcasters" element={<BroadcasterList />} />
         <Route path="/clips/:id" element={<ClipDetail />} />
         <Route path="/broadcasters/:name" element={<BroadcasterDetail />} />
+        <Route path="/my-reactions" element={<MyReactions />} />
       </Routes>
     </BrowserRouter>
   );

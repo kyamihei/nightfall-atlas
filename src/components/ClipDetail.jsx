@@ -1,10 +1,9 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Heart, ThumbsDown, Star, Send, Flag, Loader2 } from "lucide-react";
+import { ArrowLeft, Heart, ThumbsDown, Send, Flag, Loader2 } from "lucide-react";
 import {
   useClip,
   useReactions,
-  useFavorites,
   useComments,
   useCommentReport,
 } from "../lib/use-clip-ranking";
@@ -39,7 +38,6 @@ export default function ClipDetail() {
   const { clip, loading, error } = useClip(id);
   const clipIds = clip ? [clip.id] : [];
   const { counts, myVotes, vote } = useReactions(clipIds);
-  const { favorites, toggle: toggleFavorite } = useFavorites();
   const { comments, submit, submitting, error: commentError } = useComments(id);
   const { report: reportComment } = useCommentReport();
 
@@ -89,7 +87,6 @@ export default function ClipDetail() {
 
   const stats = counts[clip.id] || { likes: 0, dislikes: 0 };
   const myVote = myVotes[clip.id];
-  const isFav = favorites.has(clip.id);
 
   return (
     <div style={styles.page}>
@@ -150,17 +147,6 @@ export default function ClipDetail() {
         >
           <ThumbsDown size={16} fill={myVote === "dislike" ? "#4DD8FF" : "none"} />
           {stats.dislikes}
-        </button>
-        <button
-          onClick={() => toggleFavorite(clip.id)}
-          style={{
-            ...styles.actionBtn,
-            color: isFav ? "#FFC857" : "#8A8A99",
-            borderColor: isFav ? "#FFC85755" : "#2E2E3A",
-          }}
-          aria-label="お気に入り登録"
-        >
-          <Star size={16} fill={isFav ? "#FFC857" : "none"} />
         </button>
       </div>
 
