@@ -1,6 +1,34 @@
+import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { useBroadcasterProfile } from "../lib/use-clip-ranking";
+
+const PERIOD_TABS = [
+  { value: "all", label: "全期間" },
+  { value: "year", label: "今年" },
+  { value: "month", label: "今月" },
+  { value: "day", label: "日別" },
+];
+
+const WEEKDAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
+
+function getLastSevenDays() {
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    days.push(d);
+  }
+  return days;
+}
+
+function formatDayLabel(date) {
+  return `${date.getMonth() + 1}/${date.getDate()}(${WEEKDAY_LABELS[date.getDay()]})`;
+}
+
+function isSameDay(a, b) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
 
 function formatViews(n) {
   return new Intl.NumberFormat("ja-JP").format(n);
@@ -9,7 +37,14 @@ function formatViews(n) {
 export default function BroadcasterDetail() {
   const { name } = useParams();
   const streamer = decodeURIComponent(name);
-  const { clips, tag, totalViews, clipCount, loading, error } = useBroadcasterProfile(streamer);
+  const [period, setPeriod] = useState("all"); // all | year | month | day
+  const [selectedDay, setSelectedDay] = useState(() => new Date());
+  const { clips, tag, totalViews, clipCount, loading, error } = useBroadcasterProfile(
+    streamer,
+    50,
+    period,
+    period === "day" ? selectedDay : undefined,
+  );
 
   if (loading) {
     return (
@@ -46,6 +81,32 @@ export default function BroadcasterDetail() {
           合計 {formatViews(totalViews)}回視聴 ・ クリップ{clipCount}件
         </p>
       </header>
+
+      <div style={styles.periodTabs}>
+        {PERIOD_TABS.map((t) => (
+          <button
+            key={t.value}
+            onClick={() => setPeriod(t.value)}
+            style={period === t.value ? styles.tabActive : styles.tab}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {period === "day" && (
+        <div style={styles.dayTabs}>
+          {getLastSevenDays().map((d) => (
+            <button
+              key={d.toDateString()}
+              onClick={() => setSelectedDay(d)}
+              style={isSameDay(d, selectedDay) ? styles.tabActive : styles.tab}
+            >
+              {formatDayLabel(d)}
+            </button>
+          ))}
+        </div>
+      )}
 
       {error && <p style={styles.errorText}>{error}</p>}
 
@@ -103,6 +164,25 @@ const styles = {
     marginBottom: 18,
   },
   header: { borderBottom: "1px solid #24242F", paddingBottom: 18, marginBottom: 18 },
+  periodTabs: { display: "flex", gap: 6, marginBottom: 12 },
+  dayTabs: { display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 16 },
+  tab: {
+    background: "transparent",
+    border: "1px solid #2E2E3A",
+    color: "#8A8A99",
+    borderRadius: 20,
+    padding: "6px 14px",
+    fontSize: 13,
+  },
+  tabActive: {
+    background: "#24242F",
+    border: "1px solid #3A3A48",
+    color: "#EDEDF2",
+    borderRadius: 20,
+    padding: "6px 14px",
+    fontSize: 13,
+    fontWeight: 500,
+  },
   nameRow: { display: "flex", alignItems: "center", gap: 10 },
   name: { fontSize: 24, fontWeight: 600, margin: 0 },
   tagBadge: {

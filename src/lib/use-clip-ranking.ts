@@ -465,8 +465,13 @@ export interface BroadcasterProfile {
   clipCount: number;
 }
 
-/** 配信者詳細ページ用に、名前でその配信者のクリップ一覧とタグをまとめて取得する */
-export function useBroadcasterProfile(streamer: string, limit = 50) {
+/** 配信者詳細ページ用に、名前でその配信者のクリップ一覧とタグをまとめて取得する（期間指定つき） */
+export function useBroadcasterProfile(
+  streamer: string,
+  limit = 50,
+  period: Period = "all",
+  referenceDate?: Date,
+) {
   const [profile, setProfile] = useState<BroadcasterProfile>({
     clips: [],
     tag: null,
@@ -480,13 +485,18 @@ export function useBroadcasterProfile(streamer: string, limit = 50) {
     let cancelled = false;
     setLoading(true);
     (async () => {
+      const { start, end } = getPeriodRange(period, referenceDate);
+      let clipsQuery = supabase
+        .from("clips")
+        .select("id, title, streamer, game, view_count, thumbnail_url, twitch_created_at")
+        .eq("streamer", streamer)
+        .order("view_count", { ascending: false })
+        .limit(limit);
+      if (start) clipsQuery = clipsQuery.gte("twitch_created_at", start);
+      if (end) clipsQuery = clipsQuery.lt("twitch_created_at", end);
+
       const [clipsRes, tagRes] = await Promise.all([
-        supabase
-          .from("clips")
-          .select("id, title, streamer, game, view_count, thumbnail_url, twitch_created_at")
-          .eq("streamer", streamer)
-          .order("view_count", { ascending: false })
-          .limit(limit),
+        clipsQuery,
         supabase
           .from("tracked_broadcasters")
           .select("tag")
@@ -511,7 +521,7 @@ export function useBroadcasterProfile(streamer: string, limit = 50) {
     return () => {
       cancelled = true;
     };
-  }, [streamer, limit]);
+  }, [streamer, limit, period, referenceDate?.getTime()]);
 
   return { ...profile, loading, error };
 }
