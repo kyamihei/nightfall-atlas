@@ -19,6 +19,7 @@ Twitchクリップのランキング掲示板。いいね/よくないねの反�
   - `MyReactions.jsx` - 自分が評価したクリップ一覧（`/my-reactions`）
   - `MyFavorites.jsx` - 自分がお気に入り登録したクリップ一覧（`/favorites`）
   - `ClipperList.jsx` - クリップ職人（クリップを作った視聴者）ランキング（`/clippers`。コンポーネント名/ルートは内部的に"clipper"のまま、UI表示名のみ「クリップ職人」）
+  - `ClipperDetail.jsx` - クリップ職人詳細。そのクリップ職人が作ったクリップの視聴回数ランキング（`/clippers/:creatorId`）。ヘッダーの合計視聴回数・クリップ数は`get_clipper_stats` RPC（全件対象・正確）から取得し、期間タブで絞り込む一覧側のlimitに引きずられて数値が過小表示されないようにしている
 - `src/lib/supabase-client.ts` - Supabaseクライアント初期化＋匿名認証（`ensureAnonymousSession`）
 - `src/lib/use-clip-ranking.ts` - データ層フック集（`useClips` / `useReactions` / `useFavorites` / `useMyFavorites` / `useComments` / `useBroadcasterSearch` / `useBroadcasterRequest` / `useCommentReport` / `useBroadcasterAvatars` など）。`favorites`テーブル・RLSはSupabaseスキーマに元々あったがUIが未実装だったため2026-09-02に`useFavorites`/`useMyFavorites`とUIを追加して完成させた
 - `supabase/schema.sql`, `supabase/migrations/` - テーブル・RLS・トリガー・RPC定義
@@ -75,6 +76,10 @@ Twitchクリップのランキング掲示板。いいね/よくないねの反�
   タイミングでしか更新されない**（リアルタイムではない）ことを踏まえて機能追加すること。
   - この修正で、以前から本番で壊れていた配信者一覧ページ（`該当する配信者が見つかりませんでした`と
     表示されていた）も直っている（クリッパー機能の実装中に偶然発見・修正した既存バグ）。
+- （未修正の既知の問題）`useBroadcasterProfile`（`BroadcasterDetail.jsx`用）は合計視聴回数・クリップ数を
+  「期間で絞り込んだ一覧のうち先頭`limit`件（デフォルト50）」から計算しており、50件を超えて
+  クリップを持つ配信者では過小表示される。`useClipperProfile`（`ClipperDetail.jsx`用）は
+  `get_clipper_stats` RPCで正しく実装したので、配信者側を直す際はこちらを参考にすること。
 
 ## 認証
 

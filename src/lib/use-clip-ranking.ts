@@ -675,6 +675,81 @@ export function useBroadcasterProfile(
   return { ...profile, loading, error };
 }
 
+export interface ClipperProfile {
+  clips: Clip[];
+  creatorName: string | null;
+  avatarUrl: string | null;
+  totalViews: number;
+  clipCount: number;
+}
+
+/**
+ * クリップ職人詳細ページ用に、creator_idでそのクリップ職人が作ったクリップ一覧を取得する（期間指定つき）。
+ * ヘッダーに出す合計視聴回数・クリップ数は、期間フィルタつきの一覧（limit件まで）からではなく
+ * get_clipper_stats RPC（全期間・全件が対象の事前集計値）から取得する。一覧側のlimitに引きずられて
+ * 多作なクリップ職人ほど数値が過小表示される、というuseBroadcasterProfileと同種の問題を避けるため。
+ */
+export function useClipperProfile(
+  creatorId: string,
+  limit = 50,
+  period: Period = "all",
+  referenceDate?: Date,
+) {
+  const [profile, setProfile] = useState<ClipperProfile>({
+    clips: [],
+    creatorName: null,
+    avatarUrl: null,
+    totalViews: 0,
+    clipCount: 0,
+  });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      const { start, end } = getPeriodRange(period, referenceDate);
+      let clipsQuery = supabase
+        .from("clips")
+        .select("id, title, streamer, game, view_count, thumbnail_url, twitch_created_at, creator_name")
+        .eq("creator_id", creatorId)
+        .order("view_count", { ascending: false })
+        .limit(limit);
+      if (start) clipsQuery = clipsQuery.gte("twitch_created_at", start);
+      if (end) clipsQuery = clipsQuery.lt("twitch_created_at", end);
+
+      const [clipsRes, statsRes] = await Promise.all([
+        clipsQuery,
+        supabase.rpc("get_clipper_stats", { target_creator_id: creatorId }),
+      ]);
+      if (cancelled) return;
+      if (clipsRes.error) {
+        setError("クリップ職人情報の取得に失敗しました");
+      } else {
+        const clips = (clipsRes.data ?? []) as (Clip & { creator_name: string | null })[];
+        const stats = statsRes.data?.[0] as
+          | { total_views: number; clip_count: number; profile_image_url: string | null }
+          | undefined;
+        setProfile({
+          clips,
+          creatorName: clips[0]?.creator_name ?? null,
+          avatarUrl: stats?.profile_image_url ?? null,
+          totalViews: stats?.total_views ?? 0,
+          clipCount: stats?.clip_count ?? 0,
+        });
+        setError(null);
+      }
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [creatorId, limit, period, referenceDate?.getTime()]);
+
+  return { ...profile, loading, error };
+}
+
 /**
  * 配信者名の配列から、アイコン画像URLをまとめて取得する（クリップ一覧・詳細ページ用）。
  * clips.streamerはtracked_broadcasters.broadcaster_nameへの外部キーではないテキスト列なので、

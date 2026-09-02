@@ -6,6 +6,7 @@ import BroadcasterDetail from "./components/BroadcasterDetail";
 import MyReactions from "./components/MyReactions";
 import MyFavorites from "./components/MyFavorites";
 import ClipperList from "./components/ClipperList";
+import ClipperDetail from "./components/ClipperDetail";
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
         <Route path="/my-reactions" element={<MyReactions />} />
         <Route path="/favorites" element={<MyFavorites />} />
         <Route path="/clippers" element={<ClipperList />} />
+        <Route path="/clippers/:creatorId" element={<ClipperDetail />} />
       </Routes>
     </BrowserRouter>
   );

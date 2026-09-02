@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Scissors, ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
+import { ArrowLeft, Scissors, ChevronLeft, ChevronRight } from "lucide-react";
 import { useTopClippers } from "../lib/use-clip-ranking";
 
 const PAGE_SIZE = 30;
@@ -59,12 +59,10 @@ export default function ClipperList() {
               const rank = (page - 1) * PAGE_SIZE + i + 1;
               const accent = RANK_ACCENTS[rank] || null;
               return (
-                <a
+                <Link
                   key={c.creator_id}
                   className="cv-list-row cv-fade-in-up"
-                  href={`https://www.twitch.tv/${encodeURIComponent(c.creator_name)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                  to={`/clippers/${encodeURIComponent(c.creator_id)}`}
                   style={{
                     ...styles.row,
                     borderColor: accent ? `${accent}55` : styles.row.borderColor,
@@ -91,8 +89,7 @@ export default function ClipperList() {
                       合計 {formatViews(c.total_views)}回視聴 ・ クリップ{c.clip_count}件
                     </p>
                   </div>
-                  <ExternalLink size={13} color="#4E4E58" style={{ flexShrink: 0 }} />
-                </a>
+                </Link>
               );
             })}
           </div>
