@@ -1,15 +1,17 @@
 import { useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Heart, ThumbsDown, Star, Send, Flag, Loader2, CornerUpLeft, X, Scissors } from "lucide-react";
+import { ArrowLeft, Heart, ThumbsDown, Star, Send, Flag, Loader2, CornerUpLeft, X, Scissors, MessageSquare } from "lucide-react";
 import {
   useClip,
   useReactions,
   useFavorites,
   useFavoriteCounts,
+  useClipStamps,
   useComments,
   useCommentReport,
   useBroadcasterAvatars,
   useClipperRanks,
+  REACTION_STAMPS,
 } from "../lib/use-clip-ranking";
 import { REACTIONS_ENABLED } from "../lib/feature-flags";
 
@@ -52,6 +54,7 @@ export default function ClipDetail() {
     await toggleFavoriteRaw(clipId);
     refreshFavoriteCounts();
   }
+  const { counts: stampCounts, myStamps, toggle: toggleStamp } = useClipStamps(clipIds);
   const avatars = useBroadcasterAvatars(clip ? [clip.streamer] : []);
   const clipperRanks = useClipperRanks(clip ? [clip.creator_id] : []);
   const { comments, submit, submitting, error: commentError } = useComments(id);
@@ -202,6 +205,32 @@ export default function ClipDetail() {
           {favoritedIds.has(clip.id) ? "お気に入り済み" : "お気に入り"}
           {favoriteCounts[clip.id] > 0 ? `（${favoriteCounts[clip.id]}）` : ""}
         </button>
+        <Link to={`/general?from=${clip.id}`} style={styles.generalThreadBtn}>
+          <MessageSquare size={14} />
+          総合スレで話す
+        </Link>
+      </div>
+
+      <div style={styles.stampRow}>
+        {REACTION_STAMPS.map((stamp) => {
+          const count = stampCounts[clip.id]?.[stamp] ?? 0;
+          const selected = myStamps[clip.id]?.has(stamp) ?? false;
+          return (
+            <button
+              key={stamp}
+              onClick={() => toggleStamp(clip.id, stamp)}
+              style={{
+                ...styles.stampBtn,
+                color: selected ? "#FFC857" : "#8A8A99",
+                borderColor: selected ? "#FFC85755" : "#2E2E3A",
+                background: selected ? "#3A2E1466" : "transparent",
+              }}
+            >
+              {stamp}
+              {count > 0 && <span style={styles.stampCount}>{count}</span>}
+            </button>
+          );
+        })}
       </div>
 
       <section style={styles.commentSection}>
@@ -386,7 +415,32 @@ const styles = {
   },
   rowAvatar: { width: 20, height: 20, borderRadius: "50%", objectFit: "cover" },
   rowAvatarFallback: { width: 20, height: 20, borderRadius: "50%", background: "#20202B", display: "inline-block" },
-  actions: { display: "flex", gap: 8, marginBottom: 28 },
+  actions: { display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" },
+  generalThreadBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    background: "transparent",
+    border: "1px solid #2E2E3A",
+    borderRadius: 8,
+    padding: "8px 14px",
+    fontSize: 13.5,
+    color: "#8A8A99",
+    textDecoration: "none",
+  },
+  stampRow: { display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 28 },
+  stampBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    background: "transparent",
+    border: "1px solid",
+    borderRadius: 20,
+    padding: "6px 12px",
+    fontSize: 13,
+    fontWeight: 500,
+  },
+  stampCount: { fontSize: 11.5, color: "#6B6B78" },
   actionBtn: {
     display: "flex",
     alignItems: "center",

@@ -306,6 +306,72 @@ export function useFavoriteCounts(clipIds: string[]) {
   return { counts, refresh };
 }
 
+export const REACTION_STAMPS = ["すっご", "うおｗ", "えっど", "こっわ", "うっま", "へった", "ひっど"] as const;
+export type ReactionStamp = (typeof REACTION_STAMPS)[number];
+
+/**
+ * リアクションスタンプ（いいね/よくないねの代替）。クリップIDの配列から、
+ * スタンプ種別ごとの合計件数（全員分）と、自分が押した種別の集合をまとめて取得する。
+ * toggle(clipId, stamp)で該当スタンプを付け外しする（Slackの絵文字リアクションのように、
+ * 1人が同じクリップに複数種類のスタンプを付けられる）。
+ */
+export function useClipStamps(clipIds: string[]) {
+  const [counts, setCounts] = useState<Record<string, Partial<Record<ReactionStamp, number>>>>({});
+  const [myStamps, setMyStamps] = useState<Record<string, Set<ReactionStamp>>>({});
+
+  const refresh = useCallback(async () => {
+    if (clipIds.length === 0) {
+      setCounts({});
+      setMyStamps({});
+      return;
+    }
+    const user = await ensureAnonymousSession();
+    const [countsRes, ownRes] = await Promise.all([
+      supabase.rpc("get_stamp_counts", { clip_ids: clipIds }),
+      supabase.from("clip_reaction_stamps").select("clip_id, stamp").eq("anon_id", user.id).in("clip_id", clipIds),
+    ]);
+
+    const nextCounts: Record<string, Partial<Record<ReactionStamp, number>>> = {};
+    for (const row of (countsRes.data ?? []) as { clip_id: string; stamp: ReactionStamp; stamp_count: number }[]) {
+      (nextCounts[row.clip_id] ??= {})[row.stamp] = Number(row.stamp_count);
+    }
+    setCounts(nextCounts);
+
+    const nextOwn: Record<string, Set<ReactionStamp>> = {};
+    for (const row of (ownRes.data ?? []) as { clip_id: string; stamp: ReactionStamp }[]) {
+      (nextOwn[row.clip_id] ??= new Set()).add(row.stamp);
+    }
+    setMyStamps(nextOwn);
+  }, [clipIds]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const toggle = useCallback(
+    async (clipId: string, stamp: ReactionStamp) => {
+      const user = await ensureAnonymousSession();
+      const alreadySelected = myStamps[clipId]?.has(stamp) ?? false;
+      if (alreadySelected) {
+        await supabase
+          .from("clip_reaction_stamps")
+          .delete()
+          .eq("clip_id", clipId)
+          .eq("anon_id", user.id)
+          .eq("stamp", stamp);
+      } else {
+        await supabase
+          .from("clip_reaction_stamps")
+          .upsert({ clip_id: clipId, anon_id: user.id, stamp }, { onConflict: "clip_id,anon_id,stamp" });
+      }
+      await refresh();
+    },
+    [myStamps, refresh],
+  );
+
+  return { counts, myStamps, toggle };
+}
+
 export interface ReactedClip extends Clip {
   reactedAt: string;
 }
@@ -709,6 +775,101 @@ export function useTopClippersByPeriod(periodStart: string, periodEnd: string, l
   }, [periodStart, periodEnd, limit]);
 
   return { clippers, loading };
+}
+
+export interface TrendingClip extends Clip {
+  views_per_hour: number;
+}
+
+/**
+ * いまトレンドのクリップ（直近lookbackHours時間以内に作られ、作成からの経過時間あたりの
+ * 視聴回数が多いクリップ）。view_countの時系列履歴は持っていないため、この「経過時間あたりの
+ * 視聴回数」を伸び方の代理指標として使っている（get_trending_clips RPC側の注記も参照）。
+ */
+export function useTrendingClips(limit = 5, lookbackHours = 72) {
+  const [clips, setClips] = useState<TrendingClip[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const { data, error } = await supabase.rpc("get_trending_clips", {
+        clip_limit: limit,
+        lookback_hours: lookbackHours,
+      });
+      if (cancelled) return;
+      if (!error) setClips(data ?? []);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [limit, lookbackHours]);
+
+  return { clips, loading };
+}
+
+/**
+ * 入力文字列がTwitchクリップのURL（https://clips.twitch.tv/<Slug> または
+ * https://www.twitch.tv/<channel>/clip/<Slug>）であれば、そのクリップIDを取り出す。
+ * URLでなければnullを返す（＝通常の検索語として扱う）。
+ */
+export function extractClipIdFromUrl(input: string): string | null {
+  const trimmed = input.trim();
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return null;
+  }
+  if (url.hostname === "clips.twitch.tv") {
+    const id = url.pathname.replace(/^\//, "").split("/")[0];
+    return id || null;
+  }
+  if (url.hostname === "www.twitch.tv" || url.hostname === "twitch.tv") {
+    const match = url.pathname.match(/\/clip\/([^/?]+)/);
+    return match ? match[1] : null;
+  }
+  return null;
+}
+
+export const SEARCH_MIN_LENGTH = 2;
+
+/** クリップタイトルのあいまい検索。SEARCH_MIN_LENGTH未満の検索語は実行しない（呼び出し側の責務） */
+export function useClipSearch(query: string) {
+  const [results, setResults] = useState<Clip[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (trimmed.length < SEARCH_MIN_LENGTH) {
+      setResults([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    (async () => {
+      const { data, error } = await supabase.rpc("search_clips", { query: trimmed, result_limit: 30 });
+      if (cancelled) return;
+      if (error) {
+        setError("検索に失敗しました。もう少し具体的なキーワードでお試しください");
+        setResults([]);
+      } else {
+        setResults(data ?? []);
+      }
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [query]);
+
+  return { results, loading, error };
 }
 
 export interface BroadcasterProfile {

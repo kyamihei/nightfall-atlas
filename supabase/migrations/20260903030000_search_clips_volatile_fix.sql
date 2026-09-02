@@ -765,33 +765,35 @@ $$ language plpgsql;
 -- クリップ名（タイトル）のあいまい検索。完全部分一致を優先し、次にpg_trgmの類似度で並べる。
 -- 総合スレのダミー行は検索結果から除外する。
 --
--- 実装メモ（本番実測で踏んだ罠、根本解決には至っていない既知の制約）:
+-- 実装メモ（本番実測で踏んだ罠）:
 -- 1. gin_trgm_ops索引はsimilarity()関数呼び出しでは使われず、`%`演算子でのみ索引が効く。
 --    similarity(title,query)をそのままWHEREに書くと索引が使われず全件スキャンになる
 --    （ORDER BYでの利用はLIMIT後の少数行にしか計算されないため問題ない）。
--- 2. 「釈迦」「号泣」のような2文字程度の短い日本語クエリは、実際のヒット件数が少数
---    （390,000件中100〜700件程度）でも、その2文字から作られるtrigram自体がありふれているため
---    索引・全件スキャンのどちらを選んでも本番実測で4〜14秒かかりうる（enable_seqscan=off
---    で索引利用を強制しても改善せず、むしろ悪化するケースもあった）。pg_trgmは英数字向けの
---    仕組みで、日本語の短い部分一致検索を高速化する決定的な方法が無いのが実情。
---    このRPC自体はシンプルな実装のままにし、フロント側（ClipRanking.jsx）で検索語の
---    最低文字数を必須にする・タイムアウト時にエラーメッセージを出す、で緩和している。
---    根本的に直すならPGroongaなど日本語対応の全文検索拡張の導入が必要（今回は未導入）。
+-- 2. `title ilike '%q%' or title % q`に書き換えても、2文字程度の短い日本語クエリだと
+--    実際のヒット件数がごく少数（例: 390,000件中136件）であってもプランナーが索引を
+--    使わずParallel Seq Scanを選んでしまうことがあり、約7秒かかってタイムアウトする
+--    （英数字の検索語では正しく索引が選ばれる。プランナーのコスト見積もりの問題）。
+--    enable_seqscanをこの関数呼び出しに限りローカルに無効化し、常に索引を使わせることで解決する。
 create or replace function search_clips(query text, result_limit int default 30)
 returns table(
   id text, title text, streamer text, game text, view_count integer,
   thumbnail_url text, twitch_created_at timestamptz, creator_id text, creator_name text
 ) as $$
-  select id, title, streamer, game, view_count, thumbnail_url, twitch_created_at, creator_id, creator_name
-  from clips
-  where id <> '__general_thread__'
-    and (title ilike '%' || query || '%' or title % query)
-  order by
-    (title ilike '%' || query || '%') desc,
-    similarity(title, query) desc,
-    view_count desc
-  limit result_limit;
-$$ language sql stable;
+begin
+  set local enable_seqscan = off;
+  return query
+    select c.id, c.title, c.streamer, c.game, c.view_count, c.thumbnail_url, c.twitch_created_at,
+      c.creator_id, c.creator_name
+    from clips c
+    where c.id <> '__general_thread__'
+      and (c.title ilike '%' || query || '%' or c.title % query)
+    order by
+      (c.title ilike '%' || query || '%') desc,
+      similarity(c.title, query) desc,
+      c.view_count desc
+    limit result_limit;
+end;
+$$ language plpgsql;
 
 -- いまトレンドのクリップ（短期間で視聴回数が急激に伸びているクリップ）。
 -- 視聴回数の時系列履歴を持っていないため、「作成からの経過時間あたりの視聴回数」を

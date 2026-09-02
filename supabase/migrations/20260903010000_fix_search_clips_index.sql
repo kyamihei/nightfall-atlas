@@ -764,19 +764,11 @@ $$ language plpgsql;
 
 -- クリップ名（タイトル）のあいまい検索。完全部分一致を優先し、次にpg_trgmの類似度で並べる。
 -- 総合スレのダミー行は検索結果から除外する。
---
--- 実装メモ（本番実測で踏んだ罠、根本解決には至っていない既知の制約）:
--- 1. gin_trgm_ops索引はsimilarity()関数呼び出しでは使われず、`%`演算子でのみ索引が効く。
---    similarity(title,query)をそのままWHEREに書くと索引が使われず全件スキャンになる
---    （ORDER BYでの利用はLIMIT後の少数行にしか計算されないため問題ない）。
--- 2. 「釈迦」「号泣」のような2文字程度の短い日本語クエリは、実際のヒット件数が少数
---    （390,000件中100〜700件程度）でも、その2文字から作られるtrigram自体がありふれているため
---    索引・全件スキャンのどちらを選んでも本番実測で4〜14秒かかりうる（enable_seqscan=off
---    で索引利用を強制しても改善せず、むしろ悪化するケースもあった）。pg_trgmは英数字向けの
---    仕組みで、日本語の短い部分一致検索を高速化する決定的な方法が無いのが実情。
---    このRPC自体はシンプルな実装のままにし、フロント側（ClipRanking.jsx）で検索語の
---    最低文字数を必須にする・タイムアウト時にエラーメッセージを出す、で緩和している。
---    根本的に直すならPGroongaなど日本語対応の全文検索拡張の導入が必要（今回は未導入）。
+-- 重要: gin_trgm_ops索引はsimilarity()関数呼び出しでは使われず、`%`演算子（類似度しきい値は
+-- pg_trgm.similarity_thresholdセッション変数、既定0.3）でのみ索引が効く。similarity(title,query)を
+-- そのままWHEREに書くと索引が使われずclips全件（数十万行）を毎回スキャンしてしまう
+-- （本番実測で約5秒、匿名ロールのタイムアウトを超える）。ORDER BYでの利用は問題ない
+-- （LIMIT後の少数行にしか計算されないため）。
 create or replace function search_clips(query text, result_limit int default 30)
 returns table(
   id text, title text, streamer text, game text, view_count integer,

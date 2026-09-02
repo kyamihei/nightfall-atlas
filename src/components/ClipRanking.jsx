@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, Users, ListChecks, Film, Star, CornerUpLeft, Scissors } from "lucide-react";
+import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, Users, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare } from "lucide-react";
 import {
   useClips,
   useReactions,
   useFavorites,
   useFavoriteCounts,
+  useClipStamps,
+  REACTION_STAMPS,
   useComments,
   useBroadcasterSearch,
   useBroadcasterRequest,
@@ -13,6 +15,7 @@ import {
   useBroadcasterAvatars,
   useClipperRanks,
   useTopClippersByPeriod,
+  useTrendingClips,
 } from "../lib/use-clip-ranking";
 import { REACTIONS_ENABLED } from "../lib/feature-flags";
 
@@ -28,6 +31,7 @@ const SORT_OPTIONS = [
   { value: "newest", label: "新着順" },
   ...(REACTIONS_ENABLED ? [{ value: "likes", label: "いいね順" }] : []),
   { value: "favorites", label: "お気に入り数順" },
+  { value: "reactions", label: "リアクション数順" },
   { value: "comments", label: "コメント数順" },
 ];
 
@@ -99,12 +103,17 @@ function ClipRow({
   isFavorited,
   onToggleFavorite,
   favoriteCount,
+  stampCounts,
+  myStamps,
+  onToggleStamp,
   commentsActive,
   onOpenComments,
   onCommentsUpdate,
   avatarUrl,
   clipperRank,
 }) {
+  const [stampPickerOpen, setStampPickerOpen] = useState(false);
+  const totalStampCount = stampCounts ? Object.values(stampCounts).reduce((sum, n) => sum + (n || 0), 0) : 0;
   // このクリップのコメント購読はここ1箇所のみで行い、サイドパネル用のデータは
   // onCommentsUpdate経由で親に伝える（同一clipへの二重購読はSupabase Realtimeがエラーになるため）
   const commentsState = useComments(clip.id);
@@ -299,8 +308,49 @@ function ClipRow({
             />
             {favoriteCount > 0 ? favoriteCount : ""}
           </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setStampPickerOpen((o) => !o);
+            }}
+            style={{
+              ...styles.actionBtn,
+              ...styles.favBtn,
+              color: stampPickerOpen ? "#EDEDF2" : "#8A8A99",
+              borderColor: stampPickerOpen ? "#3A3A48" : "#2E2E3A",
+            }}
+            aria-label="リアクションスタンプ"
+            title="リアクションスタンプ"
+          >
+            <span style={{ fontSize: 14 }}>😲</span>
+            {totalStampCount > 0 ? totalStampCount : ""}
+          </button>
         </div>
       </div>
+
+      {stampPickerOpen && (
+        <div className="cv-fade-in" style={styles.stampPickerRow} onClick={(e) => e.stopPropagation()}>
+          {REACTION_STAMPS.map((stamp) => {
+            const count = stampCounts?.[stamp] ?? 0;
+            const selected = myStamps?.has(stamp) ?? false;
+            return (
+              <button
+                key={stamp}
+                onClick={() => onToggleStamp(clip.id, stamp)}
+                style={{
+                  ...styles.stampBtn,
+                  color: selected ? "#FFC857" : "#8A8A99",
+                  borderColor: selected ? "#FFC85755" : "#2E2E3A",
+                  background: selected ? "#3A2E1466" : "transparent",
+                }}
+              >
+                {stamp}
+                {count > 0 && <span style={styles.stampCount}>{count}</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {playerOpen && (
         <div className="cv-fade-in" style={styles.playerPanel} onClick={(e) => e.stopPropagation()}>
@@ -396,6 +446,10 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
           <X size={18} />
         </button>
       </div>
+      <Link to={`/general?from=${clip.id}`} style={styles.generalThreadLink}>
+        <MessageSquare size={12} />
+        総合スレで話す
+      </Link>
 
       <div style={styles.commentList}>
         {comments.length === 0 && (
@@ -512,6 +566,47 @@ function WeeklyClipperBoard({ clippers, loading }) {
   );
 }
 
+/**
+ * いまトレンドのクリップ（直近72時間以内に作られ、作成からの経過時間あたりの視聴回数が多いクリップ）。
+ * view_countの時系列履歴を持っていないため、この「経過時間あたりの視聴回数」を伸び方の代理指標にしている
+ * （詳細はget_trending_clips RPCのコメント参照）。
+ */
+function TrendingBoard({ clips, loading }) {
+  if (!loading && clips.length === 0) return null;
+
+  return (
+    <div style={styles.weeklyBoard}>
+      <div style={styles.weeklyBoardHeader}>
+        <p style={styles.weeklyBoardTitle}>
+          <TrendingUp size={14} style={{ marginRight: 6, verticalAlign: -2 }} color="#FF4D6D" />
+          いまトレンド
+        </p>
+      </div>
+      <div style={styles.weeklyBoardList}>
+        {loading
+          ? Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="cv-skeleton" style={styles.trendingChipSkeleton} />
+            ))
+          : clips.map((clip) => (
+              <Link key={clip.id} to={`/clips/${clip.id}`} style={styles.trendingChip}>
+                <div style={styles.trendingChipThumb}>
+                  {clip.thumbnail_url ? (
+                    <img src={clip.thumbnail_url} alt="" style={styles.trendingChipThumbImg} />
+                  ) : (
+                    <span style={styles.trendingChipThumbFallback}>{clip.game}</span>
+                  )}
+                </div>
+                <span style={styles.weeklyChipInfo}>
+                  <span style={{ ...styles.weeklyChipName, maxWidth: 150 }}>{clip.title}</span>
+                  <span style={styles.weeklyChipViews}>{clip.streamer} ・ 時間あたり{formatViews(Math.round(clip.views_per_hour))}回視聴</span>
+                </span>
+              </Link>
+            ))}
+      </div>
+    </div>
+  );
+}
+
 /** 読み込み中に表示するクリップ行の骨組み（レイアウトのガタつきを防ぐ） */
 function SkeletonRow({ delay }) {
   return (
@@ -558,6 +653,7 @@ export default function ClipRanking() {
     },
     [toggleFavoriteRaw, refreshFavoriteCounts],
   );
+  const { counts: stampCounts, myStamps, toggle: toggleStamp } = useClipStamps(clipIds);
   const streamerNames = useMemo(() => [...new Set(clips.map((c) => c.streamer))], [clips]);
   const avatars = useBroadcasterAvatars(streamerNames);
   const creatorIds = useMemo(() => clips.map((c) => c.creator_id), [clips]);
@@ -575,6 +671,7 @@ export default function ClipRanking() {
     weekRange.end,
     5,
   );
+  const { clips: trendingClips, loading: trendingLoading } = useTrendingClips(5, 72);
 
   const [activeCommentClipId, setActiveCommentClipId] = useState(null);
   const [commentsDataByClip, setCommentsDataByClip] = useState({});
@@ -656,12 +753,12 @@ export default function ClipRanking() {
         <div>
           <div style={styles.eyebrowRow}>
             <span className="cv-live-dot" style={styles.liveDot} />
-            <span style={styles.eyebrow}>デイリークリップランキング</span>
+            <span style={styles.eyebrow}>Twitchクリップの掲示板</span>
           </div>
           <h1 className="clip-title-font" style={styles.h1}>
-            Twitchクリップ掲示板
+            クリスレ
           </h1>
-          <p style={styles.tagline}>視聴回数順のクリップランキング</p>
+          <p style={styles.tagline}>みんなのお気に入りのクリップにコメントしてみよう！</p>
         </div>
         <div className="cv-header-controls" style={styles.headerControls}>
           <div style={styles.headerLinks}>
@@ -672,6 +769,14 @@ export default function ClipRanking() {
             <Link to="/clippers" style={styles.broadcastersLink}>
               <Scissors size={13} />
               クリップ職人
+            </Link>
+            <Link to="/search" style={styles.broadcastersLink}>
+              <Search size={13} />
+              クリップ検索
+            </Link>
+            <Link to="/general" style={styles.broadcastersLink}>
+              <MessageSquare size={13} />
+              総合スレ
             </Link>
             {REACTIONS_ENABLED && (
               <Link to="/my-reactions" style={styles.broadcastersLink}>
@@ -696,6 +801,7 @@ export default function ClipRanking() {
         </div>
       </header>
 
+      <TrendingBoard clips={trendingClips} loading={trendingLoading} />
       <WeeklyClipperBoard clippers={weeklyClippers} loading={weeklyClippersLoading} />
 
       <div className="cv-ranking-controls" style={styles.rankingControlsRow}>
@@ -817,6 +923,9 @@ export default function ClipRanking() {
                 isFavorited={favoritedIds.has(clip.id)}
                 onToggleFavorite={toggleFavorite}
                 favoriteCount={favoriteCounts[clip.id] || 0}
+                stampCounts={stampCounts[clip.id]}
+                myStamps={myStamps[clip.id]}
+                onToggleStamp={toggleStamp}
                 commentsActive={activeCommentClipId === clip.id}
                 onOpenComments={toggleComments}
                 onCommentsUpdate={handleCommentsUpdate}
@@ -1026,6 +1135,34 @@ const styles = {
   },
   weeklyChipViews: { fontSize: 11, color: "#6B6B78" },
   weeklyChipSkeleton: { width: 160, height: 42, borderRadius: 8, flexShrink: 0 },
+  trendingChip: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    background: "#20202B",
+    border: "1px solid #2E2E3A",
+    borderRadius: 8,
+    padding: "8px 12px",
+    textDecoration: "none",
+    color: "#EDEDF2",
+    flexShrink: 0,
+    minWidth: 220,
+    maxWidth: 220,
+  },
+  trendingChipThumb: {
+    width: 40,
+    height: 28,
+    borderRadius: 5,
+    overflow: "hidden",
+    flexShrink: 0,
+    background: "#2A2A36",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  trendingChipThumbImg: { width: "100%", height: "100%", objectFit: "cover" },
+  trendingChipThumbFallback: { fontSize: 7, color: "#8A8A99", textAlign: "center" },
+  trendingChipSkeleton: { width: 220, height: 44, borderRadius: 8, flexShrink: 0 },
   pagination: {
     display: "flex",
     alignItems: "center",
@@ -1175,6 +1312,26 @@ const styles = {
     fontSize: 12.5,
   },
   favBtn: { padding: "6px 8px" },
+  stampPickerRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTop: "1px solid #24242F",
+  },
+  stampBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    background: "transparent",
+    border: "1px solid",
+    borderRadius: 20,
+    padding: "5px 11px",
+    fontSize: 12.5,
+    fontWeight: 500,
+  },
+  stampCount: { fontSize: 11, color: "#6B6B78" },
   playerPanel: {
     marginTop: 12,
     paddingTop: 12,
@@ -1214,6 +1371,16 @@ const styles = {
     paddingBottom: 14,
     marginBottom: 14,
     borderBottom: "1px solid #24242F",
+  },
+  generalThreadLink: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+    fontSize: 11.5,
+    color: "#8A8A99",
+    textDecoration: "none",
+    marginTop: -8,
+    marginBottom: 12,
   },
   commentSidebarTitle: {
     fontSize: 14,

@@ -152,6 +152,54 @@ Twitchクリップのランキング掲示板。いいね/よくないねの反�
   必ず`useMemo`で参照を安定させること**（`useBroadcasterAvatars`/`useClipperRanks`のように
   文字列キーへ変換してから依存配列に使う方式でもよい）。
 
+## サイト名変更・リアクションスタンプ・検索・総合スレ・トレンド（2026-09-03追加）
+
+- **サイト名を「クリスレ」に変更**（`<title>`は「クリスレ | Twitchクリップの掲示板」）。トップページの
+  サブタイトルも「みんなのお気に入りのクリップにコメントしてみよう！」に変更（`ClipRanking.jsx`）。
+- **Twitch本家のクリップいいね（リアクション絵文字）は集計不可と判明**：Twitch Helix
+  （公開API）のGet Clipsレスポンスにはリアクション/絵文字データが含まれておらず、視聴者が見ている
+  「いいね」的な機能は非公開のGraphQL/クライアント側実装であり外部から取得する手段がない
+  （Web調査で確認、2026-09-03）。この項目はユーザーへの説明のうえ実装を見送り、
+  代わりに以下の独自リアクションスタンプで置き換えた。
+- **リアクションスタンプ機能**: 「すっご」「うおｗ」「えっど」「こっわ」「うっま」「へった」「ひっど」の
+  7種類のスタンプをクリップごとに複数選択可能（`clip_reaction_stamps`テーブル、
+  `(clip_id, anon_id, stamp)`でunique）。`get_stamp_counts(clip_ids)` RPCで件数取得、
+  `useClipStamps`フック（`use-clip-ranking.ts`）でトグル管理。`ClipRanking.jsx`のClipRow・
+  `ClipDetail.jsx`の両方に絵文字ピッカーUIを実装。
+  - 並び替えに「リアクション数順」を追加（`get_ranked_clips`のsort_by='reactions'、likes/favoritesと
+    同じ「小さいテーブル起点でclipsへJOIN」パターンでタイムアウト回避）。
+- **クリップ検索機能**（`/search`、`ClipSearch.jsx`）: タイトル部分一致・あいまい検索
+  （`search_clips` RPC、pg_trgmの`title % query`演算子＋`title ilike '%query%'`のOR、
+  `idx_clips_title_trgm` GINインデックス使用）。TwitchクリップURLを直接貼り付けると
+  `extractClipIdFromUrl`でIDを抽出し自動的にそのクリップページへ遷移する。
+  - **既知の制約（未解決・意図的に許容）**: 2文字程度の短い日本語クエリ（例:「釈迦」「号泣」）は
+    トライグラムの絞り込みが効きにくく候補が多すぎて、匿名ロールのstatement_timeout=3秒を
+    超えてタイムアウトすることがある（本番実測で約5秒かかり57014エラー）。
+    `similarity()`関数呼び出しは索引を使えない（`%`演算子のみ索引化される）ことを確認済み、
+    `SET LOCAL enable_seqscan=off`も試したが`stable`関数では使えず、`volatile`にして試しても
+    かえって遅くなった（EXPLAIN ANALYZEで無駄な再チェック行数40万近くに増加）ため、
+    バックエンド側の抜本修正はせず「検索に失敗しました。もう少し具体的なキーワードでお試しください」
+    という案内をフロント側で出す形で許容している。根本対応にはPGroonga等の日本語対応全文検索が
+    必要（未導入）。3文字以上や英数字クエリなら問題なく高速。
+  - `SEARCH_MIN_LENGTH = 2`未満の入力では検索を実行しない（UIヒント表示のみ）。
+- **総合スレ（`/general`、`GeneralThread.jsx`）**: クリップに紐付かない全体掲示板。
+  新テーブルを追加せず、既存の`comments`テーブル・`post-comment` Edge Function・返信機能を
+  そのまま流用する設計。`clips`テーブルに`id='__general_thread__'`という番兵行を追加し、
+  これを対象クリップとして扱うことで実現している（`get_ranked_clips`等の集計系RPC・
+  `top_broadcasters_mv`/`top_clippers_mv`はこの番兵行を`where id <> '__general_thread__'`で
+  明示的に除外）。各クリップの「総合スレで話す」リンク（`/general?from=<clipId>`）から来た場合、
+  投稿本文の先頭に`[[clip:<clipId>]]`という目印文字列を付けてDBスキーマ変更なしに
+  「どのクリップの話か」を記録する（表示時は正規表現で取り除きチップ表示に変換）。
+  直接`/general`に来た場合はこの目印なしで投稿され、番兵行のバッジは表示されない。
+- **トレンドクリップ**（トップページ`TrendingBoard`）: 過去1〜72時間以内に作られたクリップを対象に
+  「視聴回数 ÷ 経過時間（時間あたり視聴回数）」で並べた上位5件を表示（`get_trending_clips` RPC）。
+  **簡易的な近似指標であることに注意**: view_countの時系列データを保存していないため、
+  真の「短期間で急激に伸びた」を判定する手段がなく、その代替として作成からの平均視聴速度を使っている。
+  72時間の絞り込みで`idx_clips_period_ranking`が効くため軽量。
+- 上記の変更は本番Supabaseに直接マイグレーション適用済み
+  （`supabase/migrations/20260903*.sql`、`search_clips`だけ紆余曲折で複数ファイルに分かれているが
+  最終的に`20260903040000_search_clips_revert_to_simple.sql`が現在の本番の姿）。
+
 ## 認証
 
 - ログイン機能はなく、Supabase Anonymous Auth（匿名サインイン）でブラウザごとにanon_idを発行・永続化し、いいね/よくないね/お気に入り/コメントを紐付けている
