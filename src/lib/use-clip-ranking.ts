@@ -27,9 +27,11 @@ export interface CommentRow {
   display_name: string;
   body: string;
   created_at: string;
+  parent_id: string | null;
 }
 
 export type Period = "all" | "year" | "month" | "day";
+export type SortBy = "views" | "newest" | "likes" | "comments";
 
 /**
  * 期間指定から開始・終了日時(ISO文字列)を計算する。
@@ -63,8 +65,18 @@ export function getPeriodRange(period: Period, referenceDate: Date = new Date())
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
-/** 日次ランキングのクリップ一覧を取得（view_count降順、期間指定・ページネーションつき） */
-export function useClips(limit = 20, period: Period = "all", referenceDate?: Date, page = 1) {
+/**
+ * ランキングのクリップ一覧を取得する（期間指定・並び替え・ページネーションつき）。
+ * 並び替え（視聴回数順以外）は集計を伴うため、get_ranked_clips RPCに期間・並び替え・
+ * ページネーションをまとめて渡し、DB側で一度に処理する（件数取得もRPCのtotal_countで完結する）。
+ */
+export function useClips(
+  limit = 20,
+  period: Period = "all",
+  referenceDate?: Date,
+  page = 1,
+  sortBy: SortBy = "views",
+) {
   const [clips, setClips] = useState<Clip[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -76,23 +88,36 @@ export function useClips(limit = 20, period: Period = "all", referenceDate?: Dat
       setLoading(true);
       const { start, end } = getPeriodRange(period, referenceDate);
       const from = (page - 1) * limit;
-      const to = from + limit - 1;
-      let query = supabase
-        .from("clips")
-        .select("id, title, streamer, game, view_count, thumbnail_url, twitch_created_at", { count: "exact" })
-        .order("view_count", { ascending: false })
-        .range(from, to);
 
-      if (start) query = query.gte("twitch_created_at", start);
-      if (end) query = query.lt("twitch_created_at", end);
+      // start/endがnull（全期間）の場合はキーごと省略し、RPC側のデフォルト値
+      // （-infinity/infinity）に委ねる。nullを明示的に渡すとPostgREST側のプリペアード
+      // ステートメントが汎用実行計画になり、索引が使われずタイムアウトする恐れがあるため。
+      const rpcArgs: Record<string, unknown> = {
+        sort_by: sortBy,
+        page_limit: limit,
+        page_offset: from,
+      };
+      if (start) rpcArgs.period_start = start;
+      if (end) rpcArgs.period_end = end;
 
-      const { data, error, count } = await query;
+      const { data, error } = await supabase.rpc("get_ranked_clips", rpcArgs);
       if (cancelled) return;
       if (error) {
         setError("クリップの取得に失敗しました");
       } else {
-        setClips(data ?? []);
-        setTotalCount(count ?? 0);
+        const rows = (data ?? []) as (Clip & { total_count: number | string })[];
+        setClips(
+          rows.map(({ id, title, streamer, game, view_count, thumbnail_url, twitch_created_at }) => ({
+            id,
+            title,
+            streamer,
+            game,
+            view_count,
+            thumbnail_url,
+            twitch_created_at,
+          })),
+        );
+        setTotalCount(rows.length > 0 ? Number(rows[0].total_count) : 0);
         setError(null);
       }
       setLoading(false);
@@ -100,7 +125,7 @@ export function useClips(limit = 20, period: Period = "all", referenceDate?: Dat
     return () => {
       cancelled = true;
     };
-  }, [limit, period, referenceDate?.getTime(), page]);
+  }, [limit, period, referenceDate?.getTime(), page, sortBy]);
 
   return { clips, loading, error, totalCount };
 }
@@ -351,7 +376,7 @@ export function useComments(clipId: string) {
     (async () => {
       const { data } = await supabase
         .from("comments")
-        .select("id, display_name, body, created_at")
+        .select("id, display_name, body, created_at, parent_id")
         .eq("clip_id", clipId)
         .eq("is_hidden", false)
         .order("created_at", { ascending: true });
@@ -376,7 +401,7 @@ export function useComments(clipId: string) {
   }, [clipId]);
 
   const submit = useCallback(
-    async (body: string, displayName: string) => {
+    async (body: string, displayName: string, parentId?: string | null) => {
       setSubmitting(true);
       setError(null);
       try {
@@ -388,7 +413,7 @@ export function useComments(clipId: string) {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ clip_id: clipId, body, display_name: displayName }),
+          body: JSON.stringify({ clip_id: clipId, body, display_name: displayName, parent_id: parentId ?? null }),
         });
         const result = await res.json();
         if (!res.ok) {

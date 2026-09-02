@@ -21,11 +21,6 @@ alter table clips add column if not exists twitch_created_at timestamptz;
 create index if not exists idx_clips_period_ranking
   on clips(twitch_created_at desc, view_count desc);
 
--- 「全期間」×「視聴回数順」（並び替えのデフォルト）は期間で絞り込まれないため
--- idx_clips_period_rankingのtwitch_created_at先頭では使えない。view_count単独の索引で
--- ORDER BY view_count DESC LIMITを索引スキャンだけで完結させる。
-create index if not exists idx_clips_view_count on clips(view_count desc);
-
 -- いいね / よくないね（1人1票、取り消し可）
 create table if not exists reactions (
   id uuid primary key default gen_random_uuid(),
@@ -250,21 +245,15 @@ $$ language sql stable;
 -- ランキング一覧を「視聴回数順(views) / 新着順(newest) / いいね順(likes) / コメント数順(comments)」の
 -- いずれかで並び替え、期間フィルタ・ページネーションを一度に処理して返す。
 -- count(*) over() で「期間フィルタ後の全件数」も同時に返すため、フロント側は別途件数取得が不要。
+-- sort_byに一致しない並び替え条件は評価結果が全行NULLになるため実質無視され、
+-- 最終的なタイブレークとしてview_count desc, idを使う（＝sort_by未指定時は従来の挙動と完全一致）。
 --
--- 実装メモ（すべて本番での実測タイムアウトを踏まえた対応）:
--- 1. period_start/period_endは「未指定なら絞り込まない」を "is null or ..." ではなく
---    -infinity/infinityのデフォルト値で表現している。PostgRESTはRPCをプリペアードステートメントとして
---    実行するため、"(param is null or col >= param)" という書き方だと呼び出し回数を重ねた際に
---    汎用実行計画（generic plan）へ切り替わり、twitch_created_atの索引（idx_clips_period_ranking）が
---    使われずclips全件（数十万行）を毎回スキャンしてしまう。単純な範囲比較にすることで
---    汎用実行計画でも索引が使われる。
--- 2. views/newest（デフォルト・新着順）はreactions/commentsとのJOINが不要なため、
---    集計を一切せずclipsだけを索引スキャン+LIMITする軽量経路を使う
---    （views/newestはユーザーが最も頻繁に使う並び替えのため、従来の性能を維持する）。
--- 3. likes/comments（いいね順・コメント数順）は集計が必須で、期間を絞らない「全期間」指定時は
---    clips全件（数十万行）に対する集計・ソートが発生し得るため、匿名ロール(anon)のデフォルト
---    statement_timeout=3sでは不足する場合がある。この分岐に限り、呼び出しをまたがない
---    トランザクションローカルな設定でタイムアウトを緩和する。
+-- period_start/period_endは「未指定なら絞り込まない」を "is null or ..." ではなく
+-- -infinity/infinityのデフォルト値で表現している。PostgRESTはRPCをプリペアードステートメントとして
+-- 実行するため、"(param is null or col >= param)" という書き方だと呼び出し回数を重ねた際に
+-- 汎用実行計画（generic plan）へ切り替わり、twitch_created_atの索引（idx_clips_period_ranking）が
+-- 使われずclips全件（数十万行）を毎回スキャンしてしまう。結果、匿名ロール(anon, statement_timeout=3s)
+-- では容易にタイムアウトする（実測済み）。単純な範囲比較にすることで汎用実行計画でも索引が使われる。
 drop function if exists get_ranked_clips(timestamptz, timestamptz, text, int, int);
 create or replace function get_ranked_clips(
   period_start timestamptz default '-infinity',
@@ -286,113 +275,43 @@ returns table(
   comment_count bigint,
   total_count bigint
 ) as $$
-declare
-  v_total bigint;
-  v_unbounded boolean := period_start = '-infinity'::timestamptz and period_end = 'infinity'::timestamptz;
-begin
-  if sort_by = 'likes' then
-    -- いいね順・コメント数順は、反応/コメントが1件も付いていないクリップまで含めて
-    -- clips全件（数十万件）を毎回スキャン・ウィンドウ集計すると匿名ロールの
-    -- statement_timeout(3s)を超えるため、reactions側を起点にする。
-    -- 「反応が0件のクリップ」はこのランキングには現れない仕様とする
-    -- （エンゲージメント順のランキングとしては一般的な挙動で、性能上も現実的）。
-    return query
-      with agg as (
-        select r.clip_id,
-          count(*) filter (where r.type = 'like') as likes,
-          count(*) filter (where r.type = 'dislike') as dislikes
-        from reactions r
-        group by r.clip_id
-      ),
-      matched as (
-        select c.*, a.likes, a.dislikes
-        from agg a
-        join clips c on c.id = a.clip_id
-        where c.twitch_created_at >= period_start
-          and c.twitch_created_at < period_end
-      )
-      select
-        m.id, m.title, m.streamer, m.game, m.view_count, m.thumbnail_url, m.twitch_created_at,
-        m.likes, m.dislikes, 0::bigint as comment_count,
-        count(*) over() as total_count
-      from matched m
-      order by m.likes desc, m.view_count desc, m.id
-      limit page_limit offset page_offset;
-  elsif sort_by = 'comments' then
-    return query
-      with agg as (
-        select cm.clip_id, count(*) as comment_count
-        from comments cm
-        where cm.is_hidden = false
-        group by cm.clip_id
-      ),
-      matched as (
-        select c.*, a.comment_count
-        from agg a
-        join clips c on c.id = a.clip_id
-        where c.twitch_created_at >= period_start
-          and c.twitch_created_at < period_end
-      )
-      select
-        m.id, m.title, m.streamer, m.game, m.view_count, m.thumbnail_url, m.twitch_created_at,
-        0::bigint as likes, 0::bigint as dislikes, m.comment_count,
-        count(*) over() as total_count
-      from matched m
-      order by m.comment_count desc, m.view_count desc, m.id
-      limit page_limit offset page_offset;
-  elsif sort_by = 'newest' then
-    -- 「全期間」（絞り込みなし）の正確なCOUNT(*)はclips全件を走査するため、
-    -- pg_class.reltuples（統計情報ベースの概算値、O(1)）で代用する。
-    -- 期間で絞り込んでいる場合は対象行数が少なく、正確なCOUNTでも安価なためそのまま数える。
-    if v_unbounded then
-      select reltuples::bigint into v_total from pg_class where oid = 'clips'::regclass;
-    else
-      select count(*) into v_total
-      from clips c
-      where c.twitch_created_at >= period_start
-        and c.twitch_created_at < period_end;
-    end if;
-
-    -- ORDER BYの列をCASE式で包むと索引が使われなくなるため、newest/views は
-    -- 生の列を直接ORDER BYする専用の分岐に分ける。NULLS LASTも索引の既定順（NULLS FIRST）と
-    -- 食い違って索引が使えなくなるため付けない（twitch_created_atがnullのクリップはごく僅少）。
-    return query
-      select
-        c.id, c.title, c.streamer, c.game, c.view_count, c.thumbnail_url, c.twitch_created_at,
-        0::bigint as likes,
-        0::bigint as dislikes,
-        0::bigint as comment_count,
-        v_total as total_count
-      from clips c
-      where c.twitch_created_at >= period_start
-        and c.twitch_created_at < period_end
-      order by c.twitch_created_at desc, c.id
-      limit page_limit offset page_offset;
-  else
-    if v_unbounded then
-      select reltuples::bigint into v_total from pg_class where oid = 'clips'::regclass;
-    else
-      select count(*) into v_total
-      from clips c
-      where c.twitch_created_at >= period_start
-        and c.twitch_created_at < period_end;
-    end if;
-
-    return query
-      select
-        c.id, c.title, c.streamer, c.game, c.view_count, c.thumbnail_url, c.twitch_created_at,
-        0::bigint as likes,
-        0::bigint as dislikes,
-        0::bigint as comment_count,
-        v_total as total_count
-      from clips c
-      where c.twitch_created_at >= period_start
-        and c.twitch_created_at < period_end
-      order by c.view_count desc, c.id
-      limit page_limit offset page_offset;
-  end if;
-end;
-$$ language plpgsql;
+  with filtered as (
+    select c.*
+    from clips c
+    where c.twitch_created_at >= period_start
+      and c.twitch_created_at < period_end
+  ),
+  like_counts as (
+    select clip_id,
+      count(*) filter (where type = 'like') as likes,
+      count(*) filter (where type = 'dislike') as dislikes
+    from reactions
+    where clip_id in (select id from filtered)
+    group by clip_id
+  ),
+  comment_counts as (
+    select clip_id, count(*) as comment_count
+    from comments
+    where is_hidden = false and clip_id in (select id from filtered)
+    group by clip_id
+  )
+  select
+    f.id, f.title, f.streamer, f.game, f.view_count, f.thumbnail_url, f.twitch_created_at,
+    coalesce(lc.likes, 0) as likes,
+    coalesce(lc.dislikes, 0) as dislikes,
+    coalesce(cc.comment_count, 0) as comment_count,
+    count(*) over() as total_count
+  from filtered f
+  left join like_counts lc on lc.clip_id = f.id
+  left join comment_counts cc on cc.clip_id = f.id
+  order by
+    case when sort_by = 'newest' then f.twitch_created_at end desc nulls last,
+    case when sort_by = 'likes' then coalesce(lc.likes, 0) end desc nulls last,
+    case when sort_by = 'comments' then coalesce(cc.comment_count, 0) end desc nulls last,
+    f.view_count desc,
+    f.id
+  limit page_limit offset page_offset;
+$$ language sql stable;
 
 -- ============================================================
 -- 運用メモ

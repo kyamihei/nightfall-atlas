@@ -30,9 +30,33 @@ Twitchクリップのランキング掲示板。いいね/よくないねの反�
 - ランキング期間タブ: 全期間 / 今年 / 今月 / 日別
 - 「1日」の区切りはtw-clipの仕様に合わせて朝6:00〜翌朝6:00（`getPeriodRange`, `src/lib/use-clip-ranking.ts`）
 
+## 並び替え・コメント返信（2026-09-02追加）
+
+- トップページに並び替えセレクター（視聴回数順 / 新着順 / いいね順 / コメント数順）を追加。
+  `get_ranked_clips` RPC（`supabase/schema.sql`）が期間フィルタ・並び替え・ページネーションを一度に処理する。
+  - **重要**: いいね順・コメント数順は「反応/コメントが1件も付いていないクリップ」をランキングに含めない
+    （clips全件を毎回スキャンすると匿名ロールのstatement_timeout=3sを超えるため。詳細はRPC本体のコメント参照）
+  - period_start/period_endは`null`ではなく`-infinity`/`infinity`をデフォルト値にしている。
+    `(param is null or col >= param)`という書き方はPostgRESTの汎用実行計画で索引が効かなくなり
+    タイムアウトする（本番で実測・修正済み）。同様のRPCを今後追加する際は同じ罠に注意すること。
+  - `idx_clips_view_count`（view_count desc単索引）を追加済み。「全期間×視聴回数順」がこの索引を使う。
+- コメントに1階層のみの返信機能を追加（`comments.parent_id`）。`post-comment` Edge Functionが
+  返信先の検証（同じクリップに属するか、返信への返信でないか）を行う。UIは`ClipRanking.jsx`の
+  `CommentSidebar`と`ClipDetail.jsx`の両方に実装（重複コードだが元々の構造を踏襲）。
+- これらの変更は本番のSupabaseプロジェクト（ClipVote）に直接マイグレーションを適用済み
+  （`supabase/migrations/20260902*.sql`）。ローカルでRPCの挙動を検証する際は
+  `npx supabase db query --linked "<SQL>"`が使える（Docker不要、本番DBに直接クエリできる）。
+
 ## 認証
 
 - ログイン機能はなく、Supabase Anonymous Auth（匿名サインイン）でブラウザごとにanon_idを発行・永続化し、いいね/よくないね/お気に入り/コメントを紐付けている
+
+## ローカル開発時の既知の制約
+
+- `post-comment` Edge FunctionのCORS許可オリジン（`ALLOWED_ORIGIN`シークレット）が本番ドメイン
+  （`https://clip-vote.vercel.app`）に固定されているため、`npm run dev`（localhost）からのコメント投稿は
+  ブラウザのCORSでブロックされる（2026-09-02時点で確認済み、私の変更が原因ではない）。
+  Edge Function自体の動作確認はcurl（CORSの影響を受けない）で行うこと。
 
 ## 環境変数
 

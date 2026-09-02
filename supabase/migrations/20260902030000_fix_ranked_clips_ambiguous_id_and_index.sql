@@ -288,74 +288,54 @@ returns table(
 ) as $$
 declare
   v_total bigint;
-  v_unbounded boolean := period_start = '-infinity'::timestamptz and period_end = 'infinity'::timestamptz;
 begin
-  if sort_by = 'likes' then
-    -- いいね順・コメント数順は、反応/コメントが1件も付いていないクリップまで含めて
-    -- clips全件（数十万件）を毎回スキャン・ウィンドウ集計すると匿名ロールの
-    -- statement_timeout(3s)を超えるため、reactions側を起点にする。
-    -- 「反応が0件のクリップ」はこのランキングには現れない仕様とする
-    -- （エンゲージメント順のランキングとしては一般的な挙動で、性能上も現実的）。
+  if sort_by in ('likes', 'comments') then
+    perform set_config('statement_timeout', '15000', true);
+
     return query
-      with agg as (
-        select r.clip_id,
+      with filtered as (
+        select c.*
+        from clips c
+        where c.twitch_created_at >= period_start
+          and c.twitch_created_at < period_end
+      ),
+      like_counts as (
+        select r.clip_id as clip_id,
           count(*) filter (where r.type = 'like') as likes,
           count(*) filter (where r.type = 'dislike') as dislikes
         from reactions r
+        where r.clip_id in (select filtered.id from filtered)
         group by r.clip_id
       ),
-      matched as (
-        select c.*, a.likes, a.dislikes
-        from agg a
-        join clips c on c.id = a.clip_id
-        where c.twitch_created_at >= period_start
-          and c.twitch_created_at < period_end
-      )
-      select
-        m.id, m.title, m.streamer, m.game, m.view_count, m.thumbnail_url, m.twitch_created_at,
-        m.likes, m.dislikes, 0::bigint as comment_count,
-        count(*) over() as total_count
-      from matched m
-      order by m.likes desc, m.view_count desc, m.id
-      limit page_limit offset page_offset;
-  elsif sort_by = 'comments' then
-    return query
-      with agg as (
-        select cm.clip_id, count(*) as comment_count
+      comment_counts as (
+        select cm.clip_id as clip_id, count(*) as comment_count
         from comments cm
-        where cm.is_hidden = false
+        where cm.is_hidden = false and cm.clip_id in (select filtered.id from filtered)
         group by cm.clip_id
-      ),
-      matched as (
-        select c.*, a.comment_count
-        from agg a
-        join clips c on c.id = a.clip_id
-        where c.twitch_created_at >= period_start
-          and c.twitch_created_at < period_end
       )
       select
-        m.id, m.title, m.streamer, m.game, m.view_count, m.thumbnail_url, m.twitch_created_at,
-        0::bigint as likes, 0::bigint as dislikes, m.comment_count,
+        f.id, f.title, f.streamer, f.game, f.view_count, f.thumbnail_url, f.twitch_created_at,
+        coalesce(lc.likes, 0) as likes,
+        coalesce(lc.dislikes, 0) as dislikes,
+        coalesce(cc.comment_count, 0) as comment_count,
         count(*) over() as total_count
-      from matched m
-      order by m.comment_count desc, m.view_count desc, m.id
+      from filtered f
+      left join like_counts lc on lc.clip_id = f.id
+      left join comment_counts cc on cc.clip_id = f.id
+      order by
+        case when sort_by = 'likes' then coalesce(lc.likes, 0) end desc nulls last,
+        case when sort_by = 'comments' then coalesce(cc.comment_count, 0) end desc nulls last,
+        f.view_count desc,
+        f.id
       limit page_limit offset page_offset;
   elsif sort_by = 'newest' then
-    -- 「全期間」（絞り込みなし）の正確なCOUNT(*)はclips全件を走査するため、
-    -- pg_class.reltuples（統計情報ベースの概算値、O(1)）で代用する。
-    -- 期間で絞り込んでいる場合は対象行数が少なく、正確なCOUNTでも安価なためそのまま数える。
-    if v_unbounded then
-      select reltuples::bigint into v_total from pg_class where oid = 'clips'::regclass;
-    else
-      select count(*) into v_total
-      from clips c
-      where c.twitch_created_at >= period_start
-        and c.twitch_created_at < period_end;
-    end if;
+    select count(*) into v_total
+    from clips c
+    where c.twitch_created_at >= period_start
+      and c.twitch_created_at < period_end;
 
-    -- ORDER BYの列をCASE式で包むと索引が使われなくなるため、newest/views は
-    -- 生の列を直接ORDER BYする専用の分岐に分ける。NULLS LASTも索引の既定順（NULLS FIRST）と
-    -- 食い違って索引が使えなくなるため付けない（twitch_created_atがnullのクリップはごく僅少）。
+    -- ORDER BYの列をCASE式で包むと（sort_by分岐が実質1択でも）索引が使われなくなるため、
+    -- newest/views は生の列を直接ORDER BYする専用の分岐に分ける。
     return query
       select
         c.id, c.title, c.streamer, c.game, c.view_count, c.thumbnail_url, c.twitch_created_at,
@@ -366,17 +346,13 @@ begin
       from clips c
       where c.twitch_created_at >= period_start
         and c.twitch_created_at < period_end
-      order by c.twitch_created_at desc, c.id
+      order by c.twitch_created_at desc nulls last, c.id
       limit page_limit offset page_offset;
   else
-    if v_unbounded then
-      select reltuples::bigint into v_total from pg_class where oid = 'clips'::regclass;
-    else
-      select count(*) into v_total
-      from clips c
-      where c.twitch_created_at >= period_start
-        and c.twitch_created_at < period_end;
-    end if;
+    select count(*) into v_total
+    from clips c
+    where c.twitch_created_at >= period_start
+      and c.twitch_created_at < period_end;
 
     return query
       select

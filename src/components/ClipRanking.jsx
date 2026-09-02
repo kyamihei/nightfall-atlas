@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, Users, ListChecks, Film, Star } from "lucide-react";
+import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, Users, ListChecks, Film, Star, CornerUpLeft } from "lucide-react";
 import {
   useClips,
   useReactions,
@@ -17,6 +17,13 @@ const PERIOD_TABS = [
   { value: "year", label: "今年" },
   { value: "month", label: "今月" },
   { value: "day", label: "日別" },
+];
+
+const SORT_OPTIONS = [
+  { value: "views", label: "視聴回数順" },
+  { value: "newest", label: "新着順" },
+  { value: "likes", label: "いいね順" },
+  { value: "comments", label: "コメント数順" },
 ];
 
 const WEEKDAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
@@ -300,6 +307,14 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
   };
   const [draft, setDraft] = useState("");
   const [localError, setLocalError] = useState("");
+  const [replyTo, setReplyTo] = useState(null); // { id, display_name } | null
+
+  const topLevel = comments.filter((c) => !c.parent_id);
+  const repliesByParent = comments.reduce((acc, c) => {
+    if (!c.parent_id) return acc;
+    (acc[c.parent_id] ??= []).push(c);
+    return acc;
+  }, {});
 
   function handleSubmit() {
     const body = draft.trim();
@@ -308,8 +323,46 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
       return;
     }
     setLocalError("");
-    submit(body, nameDraft);
+    submit(body, nameDraft, replyTo?.id ?? null);
     setDraft("");
+    setReplyTo(null);
+  }
+
+  function renderComment(c, isReply) {
+    const alreadyReported = reportedIds.has(c.id);
+    return (
+      <div key={c.id} style={isReply ? styles.commentItemReply : styles.commentItem}>
+        <div style={styles.commentHead}>
+          <span style={styles.commentName}>{c.display_name}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={styles.commentTime}>{timeAgo(new Date(c.created_at).getTime())}</span>
+            {!isReply && (
+              <button
+                onClick={() => setReplyTo({ id: c.id, display_name: c.display_name })}
+                style={styles.replyBtn}
+                aria-label="返信"
+                title="このコメントに返信"
+              >
+                <CornerUpLeft size={12} />
+              </button>
+            )}
+            <button
+              onClick={() => onReport(c.id)}
+              disabled={alreadyReported}
+              style={{
+                ...styles.reportBtn,
+                color: alreadyReported ? "#4A4A54" : "#6B6B78",
+              }}
+              aria-label="コメントを通報"
+              title={alreadyReported ? "通報済み" : "不適切なコメントを通報"}
+            >
+              <Flag size={12} />
+            </button>
+          </div>
+        </div>
+        <p style={styles.commentBody}>{c.body}</p>
+      </div>
+    );
   }
 
   return (
@@ -325,35 +378,30 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
         {comments.length === 0 && (
           <p style={styles.noComment}>まだコメントはありません。最初のコメントを投稿してみましょう。</p>
         )}
-        {comments.map((c) => {
-          const alreadyReported = reportedIds.has(c.id);
-          return (
-            <div key={c.id} style={styles.commentItem}>
-              <div style={styles.commentHead}>
-                <span style={styles.commentName}>{c.display_name}</span>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={styles.commentTime}>{timeAgo(new Date(c.created_at).getTime())}</span>
-                  <button
-                    onClick={() => onReport(c.id)}
-                    disabled={alreadyReported}
-                    style={{
-                      ...styles.reportBtn,
-                      color: alreadyReported ? "#4A4A54" : "#6B6B78",
-                    }}
-                    aria-label="コメントを通報"
-                    title={alreadyReported ? "通報済み" : "不適切なコメントを通報"}
-                  >
-                    <Flag size={12} />
-                  </button>
-                </div>
+        {topLevel.map((c) => (
+          <div key={c.id}>
+            {renderComment(c, false)}
+            {(repliesByParent[c.id] ?? []).map((r) => (
+              <div key={r.id} style={styles.replyIndent}>
+                {renderComment(r, true)}
               </div>
-              <p style={styles.commentBody}>{c.body}</p>
-            </div>
-          );
-        })}
+            ))}
+          </div>
+        ))}
       </div>
 
       <div style={styles.commentForm}>
+        {replyTo && (
+          <div style={styles.replyBanner}>
+            <span>
+              <CornerUpLeft size={11} style={{ verticalAlign: -1, marginRight: 4 }} />
+              {replyTo.display_name} に返信中
+            </span>
+            <button onClick={() => setReplyTo(null)} style={styles.replyCancelBtn} aria-label="返信をやめる">
+              <X size={12} />
+            </button>
+          </div>
+        )}
         <input
           value={nameDraft}
           onChange={(e) => onNameDraftChange(e.target.value)}
@@ -368,7 +416,7 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
               setDraft(e.target.value);
               if (localError) setLocalError("");
             }}
-            placeholder="このクリップについてコメント…"
+            placeholder={replyTo ? `${replyTo.display_name} への返信…` : "このクリップについてコメント…"}
             style={styles.commentInput}
             rows={2}
             maxLength={280}
@@ -415,11 +463,13 @@ export default function ClipRanking() {
   const [period, setPeriod] = useState("day"); // all | year | month | day
   const [selectedDay, setSelectedDay] = useState(() => new Date());
   const [page, setPage] = useState(1);
+  const [sortBy, setSortBy] = useState("views"); // views | newest | likes | comments
   const { clips, loading, error: clipsError, totalCount } = useClips(
     PAGE_SIZE,
     period,
     period === "day" ? selectedDay : undefined,
     page,
+    sortBy,
   );
   const clipIds = useMemo(() => clips.map((c) => c.id), [clips]);
   const { counts, myVotes, vote } = useReactions(clipIds);
@@ -438,10 +488,10 @@ export default function ClipRanking() {
   const { request: requestBroadcaster, submitting: requesting, result: requestResult } = useBroadcasterRequest();
   const { report: reportComment } = useCommentReport();
 
-  // 期間・日付・検索条件が変わったら1ページ目に戻す（違うページに条件が引き継がれて空表示になるのを防ぐ）
+  // 期間・日付・並び替え・検索条件が変わったら1ページ目に戻す（違うページに条件が引き継がれて空表示になるのを防ぐ）
   useEffect(() => {
     setPage(1);
-  }, [period, selectedDay, searchQuery]);
+  }, [period, selectedDay, sortBy, searchQuery]);
 
   // コメントパネルを開いている間はEscで閉じられるようにし、背後のページスクロールを止める
   useEffect(() => {
@@ -541,16 +591,30 @@ export default function ClipRanking() {
         </div>
       </header>
 
-      <div style={styles.periodTabs}>
-        {PERIOD_TABS.map((t) => (
-          <button
-            key={t.value}
-            onClick={() => setPeriod(t.value)}
-            style={period === t.value ? styles.tabActive : styles.tab}
-          >
-            {t.label}
-          </button>
-        ))}
+      <div className="cv-ranking-controls" style={styles.rankingControlsRow}>
+        <div style={styles.periodTabs}>
+          {PERIOD_TABS.map((t) => (
+            <button
+              key={t.value}
+              onClick={() => setPeriod(t.value)}
+              style={period === t.value ? styles.tabActive : styles.tab}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value)}
+          style={styles.sortSelect}
+          aria-label="並び替え"
+        >
+          {SORT_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       {period === "day" && (
@@ -784,7 +848,23 @@ const styles = {
     fontSize: 13,
     fontWeight: 500,
   },
-  periodTabs: { display: "flex", gap: 6, marginBottom: 16 },
+  rankingControlsRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: 10,
+    marginBottom: 16,
+  },
+  periodTabs: { display: "flex", flexWrap: "wrap", gap: 6 },
+  sortSelect: {
+    background: "#1C1C26",
+    border: "1px solid #2E2E3A",
+    color: "#C4C4D0",
+    borderRadius: 8,
+    padding: "6px 10px",
+    fontSize: 12.5,
+  },
   dayTabs: { display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 16 },
   pagination: {
     display: "flex",
@@ -983,7 +1063,9 @@ const styles = {
     marginBottom: 14,
   },
   noComment: { fontSize: 13, color: "#6B6B78", margin: 0 },
-  commentItem: { background: "#20202B", borderRadius: 8, padding: "8px 10px" },
+  commentItem: { background: "#20202B", borderRadius: 8, padding: "8px 10px", marginBottom: 6 },
+  commentItemReply: { background: "#1C1C26", borderRadius: 8, padding: "7px 10px" },
+  replyIndent: { marginLeft: 16, paddingLeft: 10, borderLeft: "2px solid #2A2A36", marginBottom: 6 },
   commentHead: { display: "flex", justifyContent: "space-between", marginBottom: 3 },
   commentName: { fontSize: 12.5, fontWeight: 500, color: "#C4C4D0" },
   commentTime: { fontSize: 11.5, color: "#5A5A66" },
@@ -992,6 +1074,32 @@ const styles = {
     background: "transparent",
     border: "none",
     padding: 2,
+    display: "flex",
+    alignItems: "center",
+  },
+  replyBtn: {
+    background: "transparent",
+    border: "none",
+    padding: 2,
+    display: "flex",
+    alignItems: "center",
+    color: "#6B6B78",
+  },
+  replyBanner: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    background: "#20202B",
+    border: "1px solid #2E2E3A",
+    borderRadius: 6,
+    padding: "6px 10px",
+    fontSize: 12,
+    color: "#9797A6",
+  },
+  replyCancelBtn: {
+    background: "transparent",
+    border: "none",
+    color: "#8A8A99",
     display: "flex",
     alignItems: "center",
   },

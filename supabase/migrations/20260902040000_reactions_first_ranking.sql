@@ -288,7 +288,6 @@ returns table(
 ) as $$
 declare
   v_total bigint;
-  v_unbounded boolean := period_start = '-infinity'::timestamptz and period_end = 'infinity'::timestamptz;
 begin
   if sort_by = 'likes' then
     -- いいね順・コメント数順は、反応/コメントが1件も付いていないクリップまで含めて
@@ -341,17 +340,10 @@ begin
       order by m.comment_count desc, m.view_count desc, m.id
       limit page_limit offset page_offset;
   elsif sort_by = 'newest' then
-    -- 「全期間」（絞り込みなし）の正確なCOUNT(*)はclips全件を走査するため、
-    -- pg_class.reltuples（統計情報ベースの概算値、O(1)）で代用する。
-    -- 期間で絞り込んでいる場合は対象行数が少なく、正確なCOUNTでも安価なためそのまま数える。
-    if v_unbounded then
-      select reltuples::bigint into v_total from pg_class where oid = 'clips'::regclass;
-    else
-      select count(*) into v_total
-      from clips c
-      where c.twitch_created_at >= period_start
-        and c.twitch_created_at < period_end;
-    end if;
+    select count(*) into v_total
+    from clips c
+    where c.twitch_created_at >= period_start
+      and c.twitch_created_at < period_end;
 
     -- ORDER BYの列をCASE式で包むと索引が使われなくなるため、newest/views は
     -- 生の列を直接ORDER BYする専用の分岐に分ける。NULLS LASTも索引の既定順（NULLS FIRST）と
@@ -369,14 +361,10 @@ begin
       order by c.twitch_created_at desc, c.id
       limit page_limit offset page_offset;
   else
-    if v_unbounded then
-      select reltuples::bigint into v_total from pg_class where oid = 'clips'::regclass;
-    else
-      select count(*) into v_total
-      from clips c
-      where c.twitch_created_at >= period_start
-        and c.twitch_created_at < period_end;
-    end if;
+    select count(*) into v_total
+    from clips c
+    where c.twitch_created_at >= period_start
+      and c.twitch_created_at < period_end;
 
     return query
       select

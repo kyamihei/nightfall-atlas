@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Heart, ThumbsDown, Star, Send, Flag, Loader2 } from "lucide-react";
+import { ArrowLeft, Heart, ThumbsDown, Star, Send, Flag, Loader2, CornerUpLeft, X } from "lucide-react";
 import {
   useClip,
   useReactions,
@@ -49,6 +49,14 @@ export default function ClipDetail() {
   const [draft, setDraft] = useState("");
   const [localError, setLocalError] = useState("");
   const [reportedIds, setReportedIds] = useState(new Set());
+  const [replyTo, setReplyTo] = useState(null); // { id, display_name } | null
+
+  const topLevelComments = comments.filter((c) => !c.parent_id);
+  const repliesByParent = comments.reduce((acc, c) => {
+    if (!c.parent_id) return acc;
+    (acc[c.parent_id] ??= []).push(c);
+    return acc;
+  }, {});
 
   function handleSubmit() {
     const body = draft.trim();
@@ -57,8 +65,9 @@ export default function ClipDetail() {
       return;
     }
     setLocalError("");
-    submit(body, nameDraft);
+    submit(body, nameDraft, replyTo?.id ?? null);
     setDraft("");
+    setReplyTo(null);
   }
 
   function handleReport(commentId) {
@@ -175,35 +184,84 @@ export default function ClipDetail() {
           {comments.length === 0 && (
             <p style={styles.noComment}>まだコメントはありません。最初のコメントを投稿してみましょう。</p>
           )}
-          {comments.map((c) => {
+          {topLevelComments.map((c) => {
             const alreadyReported = reportedIds.has(c.id);
             return (
-              <div key={c.id} style={styles.commentItem}>
-                <div style={styles.commentHead}>
-                  <span style={styles.commentName}>{c.display_name}</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={styles.commentTime}>{timeAgo(new Date(c.created_at).getTime())}</span>
-                    <button
-                      onClick={() => handleReport(c.id)}
-                      disabled={alreadyReported}
-                      style={{
-                        ...styles.reportBtn,
-                        color: alreadyReported ? "#4A4A54" : "#6B6B78",
-                      }}
-                      aria-label="コメントを通報"
-                      title={alreadyReported ? "通報済み" : "不適切なコメントを通報"}
-                    >
-                      <Flag size={12} />
-                    </button>
+              <div key={c.id}>
+                <div style={styles.commentItem}>
+                  <div style={styles.commentHead}>
+                    <span style={styles.commentName}>{c.display_name}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={styles.commentTime}>{timeAgo(new Date(c.created_at).getTime())}</span>
+                      <button
+                        onClick={() => setReplyTo({ id: c.id, display_name: c.display_name })}
+                        style={styles.replyBtn}
+                        aria-label="返信"
+                        title="このコメントに返信"
+                      >
+                        <CornerUpLeft size={12} />
+                      </button>
+                      <button
+                        onClick={() => handleReport(c.id)}
+                        disabled={alreadyReported}
+                        style={{
+                          ...styles.reportBtn,
+                          color: alreadyReported ? "#4A4A54" : "#6B6B78",
+                        }}
+                        aria-label="コメントを通報"
+                        title={alreadyReported ? "通報済み" : "不適切なコメントを通報"}
+                      >
+                        <Flag size={12} />
+                      </button>
+                    </div>
                   </div>
+                  <p style={styles.commentBody}>{c.body}</p>
                 </div>
-                <p style={styles.commentBody}>{c.body}</p>
+                {(repliesByParent[c.id] ?? []).map((r) => {
+                  const replyReported = reportedIds.has(r.id);
+                  return (
+                    <div key={r.id} style={styles.replyIndent}>
+                      <div style={styles.commentItemReply}>
+                        <div style={styles.commentHead}>
+                          <span style={styles.commentName}>{r.display_name}</span>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={styles.commentTime}>{timeAgo(new Date(r.created_at).getTime())}</span>
+                            <button
+                              onClick={() => handleReport(r.id)}
+                              disabled={replyReported}
+                              style={{
+                                ...styles.reportBtn,
+                                color: replyReported ? "#4A4A54" : "#6B6B78",
+                              }}
+                              aria-label="コメントを通報"
+                              title={replyReported ? "通報済み" : "不適切なコメントを通報"}
+                            >
+                              <Flag size={12} />
+                            </button>
+                          </div>
+                        </div>
+                        <p style={styles.commentBody}>{r.body}</p>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             );
           })}
         </div>
 
         <div style={styles.commentForm}>
+          {replyTo && (
+            <div style={styles.replyBanner}>
+              <span>
+                <CornerUpLeft size={11} style={{ verticalAlign: -1, marginRight: 4 }} />
+                {replyTo.display_name} に返信中
+              </span>
+              <button onClick={() => setReplyTo(null)} style={styles.replyCancelBtn} aria-label="返信をやめる">
+                <X size={12} />
+              </button>
+            </div>
+          )}
           <input
             value={nameDraft}
             onChange={(e) => setNameDraft(e.target.value)}
@@ -218,7 +276,7 @@ export default function ClipDetail() {
                 setDraft(e.target.value);
                 if (localError) setLocalError("");
               }}
-              placeholder="このクリップについてコメント…"
+              placeholder={replyTo ? `${replyTo.display_name} への返信…` : "このクリップについてコメント…"}
               style={styles.commentInput}
               rows={2}
               maxLength={280}
@@ -300,11 +358,26 @@ const styles = {
   commentList: { display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 },
   noComment: { fontSize: 13, color: "#6B6B78", margin: 0 },
   commentItem: { background: "#1C1C26", border: "1px solid #24242F", borderRadius: 8, padding: "10px 12px" },
+  commentItemReply: { background: "#18181F", border: "1px solid #22222C", borderRadius: 8, padding: "9px 12px" },
+  replyIndent: { marginLeft: 20, paddingLeft: 12, borderLeft: "2px solid #24242F", marginTop: 8 },
   commentHead: { display: "flex", justifyContent: "space-between", marginBottom: 3 },
   commentName: { fontSize: 12.5, fontWeight: 500, color: "#C4C4D0" },
   commentTime: { fontSize: 11.5, color: "#5A5A66" },
   commentBody: { fontSize: 13.5, margin: 0, lineHeight: 1.5, color: "#DADAE2" },
   reportBtn: { background: "transparent", border: "none", padding: 2, display: "flex", alignItems: "center" },
+  replyBtn: { background: "transparent", border: "none", padding: 2, display: "flex", alignItems: "center", color: "#6B6B78" },
+  replyBanner: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    background: "#1C1C26",
+    border: "1px solid #2E2E3A",
+    borderRadius: 6,
+    padding: "6px 10px",
+    fontSize: 12,
+    color: "#9797A6",
+  },
+  replyCancelBtn: { background: "transparent", border: "none", color: "#8A8A99", display: "flex", alignItems: "center" },
   commentErrorText: { fontSize: 12, color: "#F0997B", margin: "2px 0 0" },
   commentForm: { display: "flex", flexDirection: "column", gap: 6 },
   nameInput: {

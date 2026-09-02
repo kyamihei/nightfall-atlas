@@ -6,7 +6,7 @@
 //
 // デプロイ: supabase functions deploy post-comment
 // 呼び出し: POST /functions/v1/post-comment
-//   body: { clip_id: string, body: string, display_name?: string }
+//   body: { clip_id: string, body: string, display_name?: string, parent_id?: string }
 //   header: Authorization: Bearer <anon session の access_token>
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -73,7 +73,7 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: "認証情報がありません" }, 401);
   }
 
-  let payload: { clip_id?: string; body?: string; display_name?: string };
+  let payload: { clip_id?: string; body?: string; display_name?: string; parent_id?: string };
   try {
     payload = await req.json();
   } catch {
@@ -83,6 +83,7 @@ Deno.serve(async (req) => {
   const clipId = (payload.clip_id ?? "").trim();
   const rawBody = (payload.body ?? "").trim();
   const displayName = (payload.display_name ?? "").trim().slice(0, MAX_NAME_LENGTH) || "名無しの視聴者";
+  const parentId = (payload.parent_id ?? "").trim() || null;
 
   if (!clipId) {
     return jsonResponse({ error: "clip_idを指定してください" }, 400);
@@ -118,6 +119,21 @@ Deno.serve(async (req) => {
     .maybeSingle();
   if (clipError || !clip) {
     return jsonResponse({ error: "対象のクリップが見つかりません" }, 404);
+  }
+
+  // 返信先の検証: 同じクリップに属し、かつ返信自体への返信ではない（スレッドは1階層のみ）ことを確認する
+  if (parentId) {
+    const { data: parentComment, error: parentError } = await supabase
+      .from("comments")
+      .select("id, clip_id, parent_id")
+      .eq("id", parentId)
+      .maybeSingle();
+    if (parentError || !parentComment || parentComment.clip_id !== clipId) {
+      return jsonResponse({ error: "返信先のコメントが見つかりません" }, 404);
+    }
+    if (parentComment.parent_id) {
+      return jsonResponse({ error: "返信への返信はできません" }, 400);
+    }
   }
 
   // 同一クリップへの連続投稿チェック（同一anon_id）
@@ -166,8 +182,9 @@ Deno.serve(async (req) => {
       ip_hash: ipHash,
       display_name: displayName,
       body: masked,
+      parent_id: parentId,
     })
-    .select("id, display_name, body, created_at")
+    .select("id, display_name, body, created_at, parent_id")
     .single();
 
   if (insertError) {
