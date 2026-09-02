@@ -585,7 +585,20 @@ export interface TopClipper {
  * 配信者ランキングと同じくget_top_broadcasters/get_top_clippersは事前集計済みの
  * マテリアライズドビューを読むだけなので軽量（sync-twitch-clips.ts実行のたびに更新される）。
  */
-export function useTopClippers(limit = 20, offset = 0) {
+export type ClipperRankingPeriod = "all" | "year" | "month";
+
+const CLIPPER_RANKING_RPC: Record<ClipperRankingPeriod, string> = {
+  all: "get_top_clippers",
+  year: "get_top_clippers_this_year",
+  month: "get_top_clippers_this_month",
+};
+
+/**
+ * 人気クリップ職人一覧（合計視聴回数順、ページネーションつき）。
+ * 総合(all)/年間(year)/月間(month)いずれも事前集計済みのマテリアライズドビューを読むだけのRPCを
+ * 呼ぶ（clips全件・年間規模の毎回集計は匿名ロールのタイムアウトを超えるため。詳細はDB側のコメント参照）。
+ */
+export function useTopClippers(limit = 20, offset = 0, period: ClipperRankingPeriod = "all") {
   const [clippers, setClippers] = useState<TopClipper[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -593,7 +606,7 @@ export function useTopClippers(limit = 20, offset = 0) {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const { data, error } = await supabase.rpc("get_top_clippers", {
+      const { data, error } = await supabase.rpc(CLIPPER_RANKING_RPC[period], {
         clipper_limit: limit,
         clipper_offset: offset,
       });
@@ -604,7 +617,7 @@ export function useTopClippers(limit = 20, offset = 0) {
     return () => {
       cancelled = true;
     };
-  }, [limit, offset]);
+  }, [limit, offset, period]);
 
   return { clippers, loading };
 }

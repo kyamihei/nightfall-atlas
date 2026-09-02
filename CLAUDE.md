@@ -106,8 +106,17 @@ Twitchクリップのランキング掲示板。いいね/よくないねの反�
   （sync-clips.ymlと同じSecretsを使う、追加設定不要）。
   - Twitch側で見つからなかった（削除済み等の）クリップはview_countを上書きせず
     `view_count_synced_at`だけ更新する（`bulk_update_clip_views`が`coalesce`で対応）。
+- クリップ職人ランキングページ（`/clippers`）は総合/年間/月間タブで切り替えられる
+  （`ClipperList.jsx`、`useTopClippers(limit, offset, period)`）。「年間」だけでもクリップ数万件
+  規模になり、get_top_clippers_by_period（週間ウィジェット用のライブ集計）を流用すると
+  本番実測で約7秒かかり匿名ロールのタイムアウトを超えることが分かったため、「年間」「月間」も
+  「総合」と同じく事前集計のマテリアライズドビュー（`top_clippers_this_year_mv` /
+  `top_clippers_this_month_mv`、`refresh_ranking_views()`で一緒に更新）を使う設計にした。
+  `date_trunc('year'/'month', now())`はリフレッシュのたびに再評価されるため、年またぎ・月またぎも
+  次のリフレッシュ（最大でも1日以内）で自動的に切り替わる。
 - **`refresh_ranking_views()`実行時の注意**: `REFRESH MATERIALIZED VIEW CONCURRENTLY`は
-  読み取りをブロックしない代わりに低速（本番実測で約19〜23秒、二つのビュー合計）。service_roleの
+  読み取りをブロックしない代わりに低速（本番実測で約20〜28秒、4つのビュー合計。
+  ビューが増えるほど伸びるので、今後さらに追加する場合は時間の余裕を見ること）。service_roleの
   既定statement_timeoutは`authenticator`から継承する8秒程度（実測9秒でタイムアウト）で不足するため、
   `alter role service_role set statement_timeout = '120s'`をマイグレーションで適用済み
   （service_roleはバックエンド専用の鍵で一般公開されないため安全）。今後service_role経由で

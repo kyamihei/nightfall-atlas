@@ -299,47 +299,6 @@ create materialized view top_clippers_mv as
 create unique index if not exists idx_top_clippers_mv_creator on top_clippers_mv(creator_id);
 create index if not exists idx_top_clippers_mv_views on top_clippers_mv(total_views desc);
 
--- 「年間/月間」クリップ職人ランキング（/clippers ページのタブ切り替え用）。
--- get_top_clippers_by_period（週間ウィジェット用）は期間で絞られる行数が少ない前提の
--- ライブ集計だが、「今年」だけで6万件規模になり匿名ロールのstatement_timeout(3s)を
--- 本番実測で大きく超える（約7秒）ため、総合ランキングと同じく事前集計が必要。
--- date_trunc('year'/'month', now())はリフレッシュを実行するたびに再評価されるため、
--- 日次〜1時間おきのリフレッシュ（sync-twitch-clips.ts / refresh-clip-views.ts）が
--- 走っている限り、年またぎ・月またぎも1日以内には自動的に切り替わる。
-drop materialized view if exists top_clippers_this_year_mv;
-create materialized view top_clippers_this_year_mv as
-  select c.creator_id,
-    max(c.creator_name) as creator_name,
-    sum(c.view_count) as total_views,
-    count(*) as clip_count,
-    max(tc.profile_image_url) as profile_image_url
-  from clips c
-  left join tracked_clippers tc on tc.creator_id = c.creator_id
-  where c.creator_id is not null
-    and c.twitch_created_at >= date_trunc('year', now())
-    and c.twitch_created_at < date_trunc('year', now()) + interval '1 year'
-  group by c.creator_id;
-
-create unique index if not exists idx_top_clippers_this_year_mv_creator on top_clippers_this_year_mv(creator_id);
-create index if not exists idx_top_clippers_this_year_mv_views on top_clippers_this_year_mv(total_views desc);
-
-drop materialized view if exists top_clippers_this_month_mv;
-create materialized view top_clippers_this_month_mv as
-  select c.creator_id,
-    max(c.creator_name) as creator_name,
-    sum(c.view_count) as total_views,
-    count(*) as clip_count,
-    max(tc.profile_image_url) as profile_image_url
-  from clips c
-  left join tracked_clippers tc on tc.creator_id = c.creator_id
-  where c.creator_id is not null
-    and c.twitch_created_at >= date_trunc('month', now())
-    and c.twitch_created_at < date_trunc('month', now()) + interval '1 month'
-  group by c.creator_id;
-
-create unique index if not exists idx_top_clippers_this_month_mv_creator on top_clippers_this_month_mv(creator_id);
-create index if not exists idx_top_clippers_this_month_mv_views on top_clippers_this_month_mv(total_views desc);
-
 -- sync-twitch-clips.ts が同期完了後に呼び出す。service_roleのみ実行可（匿名/認証ユーザーからの
 -- 乱用によるリフレッシュ連打を防ぐため、publicへのEXECUTE権限を明示的に外している）。
 create or replace function refresh_ranking_views()
@@ -347,8 +306,6 @@ returns void as $$
 begin
   refresh materialized view concurrently top_broadcasters_mv;
   refresh materialized view concurrently top_clippers_mv;
-  refresh materialized view concurrently top_clippers_this_year_mv;
-  refresh materialized view concurrently top_clippers_this_month_mv;
 end;
 $$ language plpgsql security definer;
 
@@ -438,12 +395,11 @@ returns table(creator_id text, rank int) as $$
   where creator_id = any(target_creator_ids) and rank <= max_rank;
 $$ language sql stable security definer;
 
--- 週間クリップ職人ランキング（トップページ表示用）専用。top_clippers_mvは全期間の事前集計のため、
+-- 週間クリップ職人ランキング（トップページ表示用）。top_clippers_mvは全期間の事前集計のため、
 -- 期間を絞った順位はここでその場で集計する。twitch_created_atの索引（idx_clips_period_ranking）で
--- 週1回分のクリップ数（数千件規模）まで絞り込んでから集計するぶんには軽いが、「今年」規模
--- （6万件超）だと本番実測で約7秒かかり匿名ロールのタイムアウトを超えるため、
--- /clippers ページの「年間/月間」タブにはこの関数を使わないこと
--- （代わりにget_top_clippers_this_year / get_top_clippers_this_monthを使う）。
+-- 週1回分のクリップ数まで絞り込んでから集計するので、全期間版と違い事前集計無しでも軽い。
+-- clipper_offsetはクリップ職人ランキングページ（/clippers）の「年間/月間」タブでの
+-- ページネーションに使う（「総合」タブは事前集計済みのtop_clippers_mvを使うget_top_clippersの方）。
 create or replace function get_top_clippers_by_period(
   period_start timestamptz,
   period_end timestamptz,
@@ -462,23 +418,6 @@ returns table(creator_id text, creator_name text, total_views bigint, clip_count
     and c.twitch_created_at >= period_start
     and c.twitch_created_at < period_end
   group by c.creator_id
-  order by total_views desc
-  limit clipper_limit offset clipper_offset;
-$$ language sql stable;
-
--- 年間/月間クリップ職人ランキング（/clippers ページのタブ切り替え用）。事前集計済みビューを読むだけ。
-create or replace function get_top_clippers_this_year(clipper_limit int default 20, clipper_offset int default 0)
-returns table(creator_id text, creator_name text, total_views bigint, clip_count bigint, profile_image_url text) as $$
-  select creator_id, creator_name, total_views, clip_count, profile_image_url
-  from top_clippers_this_year_mv
-  order by total_views desc
-  limit clipper_limit offset clipper_offset;
-$$ language sql stable;
-
-create or replace function get_top_clippers_this_month(clipper_limit int default 20, clipper_offset int default 0)
-returns table(creator_id text, creator_name text, total_views bigint, clip_count bigint, profile_image_url text) as $$
-  select creator_id, creator_name, total_views, clip_count, profile_image_url
-  from top_clippers_this_month_mv
   order by total_views desc
   limit clipper_limit offset clipper_offset;
 $$ language sql stable;

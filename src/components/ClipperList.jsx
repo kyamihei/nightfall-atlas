@@ -5,14 +5,25 @@ import { useTopClippers } from "../lib/use-clip-ranking";
 
 const PAGE_SIZE = 30;
 const RANK_ACCENTS = { 1: "#FFC857", 2: "#C9CEDA", 3: "#D98E5D" };
+const PERIOD_TABS = [
+  { value: "all", label: "総合" },
+  { value: "year", label: "年間" },
+  { value: "month", label: "月間" },
+];
 
 function formatViews(n) {
   return new Intl.NumberFormat("ja-JP").format(n);
 }
 
 export default function ClipperList() {
+  const [period, setPeriod] = useState("all"); // all | year | month
   const [page, setPage] = useState(1);
-  const { clippers, loading } = useTopClippers(PAGE_SIZE, (page - 1) * PAGE_SIZE);
+  const { clippers, loading } = useTopClippers(PAGE_SIZE, (page - 1) * PAGE_SIZE, period);
+
+  function handlePeriodChange(next) {
+    setPeriod(next);
+    setPage(1); // 期間を切り替えたら1ページ目に戻す（違うページに条件が引き継がれて空表示になるのを防ぐ）
+  }
 
   return (
     <div style={styles.page}>
@@ -47,13 +58,27 @@ export default function ClipperList() {
         </div>
       </header>
 
+      <div style={styles.periodTabs}>
+        {PERIOD_TABS.map((t) => (
+          <button
+            key={t.value}
+            onClick={() => handlePeriodChange(t.value)}
+            style={period === t.value ? styles.tabActive : styles.tab}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
       {loading ? (
         <p style={styles.loadingText}>読み込み中…</p>
       ) : (
         <>
           <div style={styles.list}>
             {clippers.length === 0 && (
-              <div style={styles.emptyState}>まだクリップ職人の記録がありません。</div>
+              <div style={styles.emptyState}>
+                {period === "all" ? "まだクリップ職人の記録がありません。" : "この期間のクリップ職人の記録がありません。"}
+              </div>
             )}
             {clippers.map((c, i) => {
               const rank = (page - 1) * PAGE_SIZE + i + 1;
@@ -144,6 +169,24 @@ const styles = {
   },
   h1: { fontSize: 26, fontWeight: 600, margin: "0 0 6px", letterSpacing: 0.5, display: "flex", alignItems: "center" },
   tagline: { fontSize: 13, color: "#6B6B78", margin: 0 },
+  periodTabs: { display: "flex", gap: 6, marginBottom: 16 },
+  tab: {
+    background: "transparent",
+    border: "1px solid #2E2E3A",
+    color: "#8A8A99",
+    borderRadius: 20,
+    padding: "6px 14px",
+    fontSize: 13,
+  },
+  tabActive: {
+    background: "#24242F",
+    border: "1px solid #3A3A48",
+    color: "#EDEDF2",
+    borderRadius: 20,
+    padding: "6px 14px",
+    fontSize: 13,
+    fontWeight: 500,
+  },
   loadingText: { color: "#8A8A99", fontSize: 14, textAlign: "center", padding: "40px 0" },
   list: { display: "flex", flexDirection: "column", gap: 8 },
   emptyState: { color: "#6B6B78", fontSize: 14, padding: "40px 0", textAlign: "center" },
