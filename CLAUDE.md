@@ -1,7 +1,10 @@
 # ClipVote プロジェクト概要
 
-Twitchクリップのランキング掲示板。いいね/よくないねの反応、お気に入り、匿名コメント、
-配信者検索・登録リクエストができるサイト（tw-clip相当のUI/仕様を踏襲）。
+サイト名「クリスレ」（`<title>`は「クリスレ | Twitchクリップの掲示板サイト」）。
+Twitchクリップのランキング掲示板。お気に入り・独自リアクションスタンプ・匿名コメント（返信対応）・
+クリップ検索（タイトル/URL）・総合スレ・トレンド表示・配信者検索・登録リクエストができるサイト
+（tw-clip相当のUI/仕様を踏襲）。いいね/よくないね機能はバックエンドごと残したままUI上のみ無効化しており、
+代わりに独自のリアクションスタンプ機能を主軸にしている（詳細は各節を参照）。
 
 ## 技術構成
 
@@ -13,18 +16,30 @@ Twitchクリップのランキング掲示板。いいね/よくないねの反�
 ## ディレクトリ構成
 
 - `src/components/` - 画面コンポーネント
-  - `ClipRanking.jsx` - トップページ。ランキング一覧＋コメントサイドパネル（`/`）
+  - `ClipRanking.jsx` - トップページ。ランキング一覧＋コメントサイドパネル＋トレンド/週間クリップ職人ボード（`/`）
   - `ClipDetail.jsx` - クリップ個別ページ、コメント欄はページ内常時表示（`/clips/:id`）
   - `BroadcasterList.jsx` / `BroadcasterDetail.jsx` - 配信者一覧・詳細（`/broadcasters`, `/broadcasters/:name`）
-  - `MyReactions.jsx` - 自分が評価したクリップ一覧（`/my-reactions`）
+  - `MyReactions.jsx` - 自分が評価したクリップ一覧（`/my-reactions`。`REACTIONS_ENABLED=false`のため実質非表示、直接URLアクセス時のみガード画面）
   - `MyFavorites.jsx` - 自分がお気に入り登録したクリップ一覧（`/favorites`）
+  - `MyStampsPage.jsx` - 自分がリアクションスタンプを押したクリップ一覧、スタンプ種別ごとにタブ切り替え（`/my-stamps`）
   - `ClipperList.jsx` - クリップ職人（クリップを作った視聴者）ランキング（`/clippers`。コンポーネント名/ルートは内部的に"clipper"のまま、UI表示名のみ「クリップ職人」）
   - `ClipperDetail.jsx` - クリップ職人詳細。そのクリップ職人が作ったクリップの視聴回数ランキング（`/clippers/:creatorId`）。ヘッダーの合計視聴回数・クリップ数は`get_clipper_stats` RPC（全件対象・正確）から取得し、期間タブで絞り込む一覧側のlimitに引きずられて数値が過小表示されないようにしている
+  - `ClipSearch.jsx` - クリップのタイトル検索・URL直接貼り付け検索（`/search`）
+  - `GeneralThread.jsx` - クリップに紐付かない全体掲示板「総合スレ」（`/general`）
+  - `Footer.jsx` - 全ページ共通フッター（ホーム/サイトについて/利用規約/プライバシーポリシー/お問い合わせ＋Copyright）
+  - `AboutPage.jsx` / `TermsPage.jsx` / `PrivacyPage.jsx` - 静的コンテンツページ（`/about`, `/terms`, `/privacy`）
+  - `ContactPage.jsx` - お問い合わせフォーム（`/contact`）
 - `src/lib/supabase-client.ts` - Supabaseクライアント初期化＋匿名認証（`ensureAnonymousSession`）
-- `src/lib/use-clip-ranking.ts` - データ層フック集（`useClips` / `useReactions` / `useFavorites` / `useMyFavorites` / `useComments` / `useBroadcasterSearch` / `useBroadcasterRequest` / `useCommentReport` / `useBroadcasterAvatars` など）。`favorites`テーブル・RLSはSupabaseスキーマに元々あったがUIが未実装だったため2026-09-02に`useFavorites`/`useMyFavorites`とUIを追加して完成させた
+- `src/lib/use-clip-ranking.ts` - データ層フック集（`useClips` / `useReactions` / `useFavorites` / `useMyFavorites` /
+  `useClipStamps` / `useMyStamps` / `useTrendingClips` / `useClipSearch` / `useComments` /
+  `useBroadcasterSearch` / `useBroadcasterRequest` / `useContactForm` / `useCommentReport` /
+  `useBroadcasterAvatars` / `useClipperRanks` / `useTopClippersByPeriod` など）。`favorites`テーブル・RLSは
+  Supabaseスキーマに元々あったがUIが未実装だったため2026-09-02に`useFavorites`/`useMyFavorites`と
+  UIを追加して完成させた
 - `supabase/schema.sql`, `supabase/migrations/` - テーブル・RLS・トリガー・RPC定義
 - `supabase/functions/post-comment/` - コメント投稿Edge Function（NGワード検査・レート制限）
 - `supabase/functions/request-broadcaster/` - 配信者登録リクエストEdge Function（Twitch実在確認つき）
+- `supabase/functions/submit-contact/` - お問い合わせフォーム送信Edge Function（レート制限のみ、NGワード検査なし）
 - `sync-twitch-clips.ts` - Twitchクリップ同期バッチ（Deno、ルート直下）
 
 ## 期間・日付の仕様
@@ -154,8 +169,12 @@ Twitchクリップのランキング掲示板。いいね/よくないねの反�
 
 ## サイト名変更・リアクションスタンプ・検索・総合スレ・トレンド（2026-09-03追加）
 
-- **サイト名を「クリスレ」に変更**（`<title>`は「クリスレ | Twitchクリップの掲示板」）。トップページの
-  サブタイトルも「みんなのお気に入りのクリップにコメントしてみよう！」に変更（`ClipRanking.jsx`）。
+- **サイト名を「クリスレ」に変更**。トップページのサブタイトルも
+  「みんなのお気に入りのクリップにコメントしてみよう！」に変更（`ClipRanking.jsx`）。
+  `<title>`（`index.html`）はこの日のうちに何度かユーザーの指示で変更されており、
+  2026-09-03時点の最終形は「クリスレ | Twitchクリップの掲示板サイト」。今後変更する際は
+  現在の`index.html`を都度確認すること（このファイルに逐一追記すると古い値と混同しやすいため、
+  以後は最終形のみ記載する）。
 - **Twitch本家のクリップいいね（リアクション絵文字）は集計不可と判明**：Twitch Helix
   （公開API）のGet Clipsレスポンスにはリアクション/絵文字データが含まれておらず、視聴者が見ている
   「いいね」的な機能は非公開のGraphQL/クライアント側実装であり外部から取得する手段がない
@@ -164,10 +183,13 @@ Twitchクリップのランキング掲示板。いいね/よくないねの反�
 - **リアクションスタンプ機能**: 「すっご」「うおｗ」「えっど」「こっわ」「うっま」「へった」「ひっど」の
   7種類のスタンプをクリップごとに複数選択可能（`clip_reaction_stamps`テーブル、
   `(clip_id, anon_id, stamp)`でunique）。`get_stamp_counts(clip_ids)` RPCで件数取得、
-  `useClipStamps`フック（`use-clip-ranking.ts`）でトグル管理。`ClipRanking.jsx`のClipRow・
-  `ClipDetail.jsx`の両方に絵文字ピッカーUIを実装。
+  `useClipStamps`フック（`use-clip-ranking.ts`）でトグル管理。`ClipDetail.jsx`は常時表示の
+  スタンプ行を実装。`ClipRanking.jsx`のClipRowは導入当初は絵文字ボタンを押すと展開する方式
+  だったが、2026-09-03中のユーザー指摘で**常時表示・直接クリック方式に変更済み**
+  （詳細は下の「ヘッダーナビ・スタンプ直押し・クリップ表示の大型化」節）。
   - 並び替えに「リアクション数順」を追加（`get_ranked_clips`のsort_by='reactions'、likes/favoritesと
     同じ「小さいテーブル起点でclipsへJOIN」パターンでタイムアウト回避）。
+  - 自分が押したスタンプ別のクリップ一覧は`/my-stamps`（`MyStampsPage.jsx`、`useMyStamps`フック）。
 - **クリップ検索機能**（`/search`、`ClipSearch.jsx`）: タイトル部分一致・あいまい検索
   （`search_clips` RPC、pg_trgmの`title % query`演算子＋`title ilike '%query%'`のOR、
   `idx_clips_title_trgm` GINインデックス使用）。TwitchクリップURLを直接貼り付けると
@@ -202,10 +224,11 @@ Twitchクリップのランキング掲示板。いいね/よくないねの反�
 
 ## フッター・お問い合わせフォーム（2026-09-03追加）
 
-- 全ページ共通の`Footer`コンポーネント（`src/components/Footer.jsx`）を追加し、
-  既存の全ページコンポーネント（10個）＋新規静的ページの計14ページ全てに配置した。
-  ホーム/サイトについて/利用規約/プライバシーポリシー/お問い合わせへのリンクとCopyright表記を表示する。
-  `ClipRanking.jsx`が元々持っていた「お気に入り・コメントは...」の注記は`note`propとして残している。
+- 全ページ共通の`Footer`コンポーネント（`src/components/Footer.jsx`）を追加し、当時存在した
+  全ページコンポーネントに配置した。ホーム/サイトについて/利用規約/プライバシーポリシー/
+  お問い合わせへのリンクとCopyright表記を表示する。`ClipRanking.jsx`が元々持っていた
+  「お気に入り・コメントは...」の注記は`note`propとして残している。**新しくページを追加する際は
+  必ず`<Footer />`を配置すること**（`MyStampsPage.jsx`など、この節より後に追加したページも配置済み）。
 - サイトについて（`/about`）・利用規約（`/terms`）・プライバシーポリシー（`/privacy`）は
   静的コンテンツのページ（`AboutPage.jsx`/`TermsPage.jsx`/`PrivacyPage.jsx`）。
 - **お問い合わせフォーム**（`/contact`、`ContactPage.jsx`）: 種類（不具合/要望/通報/その他）・
@@ -245,16 +268,39 @@ Twitchクリップのランキング掲示板。いいね/よくないねの反�
     - `broadcaster_requests_insert_own`ポリシー（`anon_id = auth.uid()`）は履歴記録用として
       そのまま追加済み（こちらは対症療法ではなく妥当な設計）。
 
+## ヘッダーナビ・スタンプ直押し・クリップ表示の大型化（2026-09-03追加）
+
+- **ヘッダーのナビゲーション項目**（配信者一覧/クリップ職人/クリップ検索/総合スレ/お気に入り等）を、
+  地味な文字リンクからボタン風（背景色・枠線付き、ホバーで強調）の目立つデザインに変更
+  （`ClipRanking.jsx`の`navLink`スタイル・`.cv-nav-link`クラス）。「重要な機能なのに目立たない」という
+  ユーザー指摘への対応。今後ヘッダーに項目を追加する際もこのボタン風スタイルに合わせること。
+- **リアクションスタンプの直押し化**: 上記の「絵文字ボタンを押してから展開」方式を廃止し、
+  クリップ一覧の各行で7種類のスタンプを常時表示・直接クリックできるように変更
+  （`ClipRow`から`stampPickerOpen`の開閉状態を削除し、常時レンダリングに変更）。
+- **PC画面でのクリップ表示を拡大**: 901px以上の画面幅で、サムネイル（64×44→128×72）とタイトル
+  フォント（15px→19px、太字化）を`.cv-clip-thumb`/`.cv-clip-title`のCSSクラス経由で拡大し、
+  無駄な余白を圧縮（`ClipRanking.jsx`の`<style>`内`@media (min-width: 901px)`）。
+  **実装上の注意**: インラインstyleオブジェクトはCSSの`@media`クエリより詳細度が高く上書きできないため、
+  レスポンシブに変えたいプロパティ（幅・高さ・フォントサイズ）はインラインstyleオブジェクトから
+  削除し、className経由のCSSクラス側に持たせる必要がある（このサイトは基本方針として
+  インラインstyleオブジェクトを使っているが、画面幅で値を変えたい箇所だけはこの例外パターンを使う）。
+- **絵文字を使わない**: サイト内UIで😲（リアクションスタンプ機能を指すアイコンとして導入時に使用）を
+  ユーザーから明示的に「使わないでほしい」と指摘され、`lucide-react`の`Smile`アイコンに置き換えた
+  （ヘッダーの「スタンプ一覧」リンク、`/my-stamps`の見出し）。**今後、装飾目的の絵文字は使わず、
+  既存パターンに倣って`lucide-react`のアイコンを使うこと**（スタンプ名自体の文字列「すっご」等は
+  絵文字ではなくテキストなので対象外）。
+
 ## 認証
 
-- ログイン機能はなく、Supabase Anonymous Auth（匿名サインイン）でブラウザごとにanon_idを発行・永続化し、いいね/よくないね/お気に入り/コメントを紐付けている
+- ログイン機能はなく、Supabase Anonymous Auth（匿名サインイン）でブラウザごとにanon_idを発行・永続化し、いいね/よくないね/お気に入り/リアクションスタンプ/コメント/お問い合わせを紐付けている
 
 ## ローカル開発時の既知の制約
 
-- `post-comment` Edge FunctionのCORS許可オリジン（`ALLOWED_ORIGIN`シークレット）が本番ドメイン
-  （`https://clip-vote.vercel.app`）に固定されているため、`npm run dev`（localhost）からのコメント投稿は
-  ブラウザのCORSでブロックされる（2026-09-02時点で確認済み、私の変更が原因ではない）。
-  Edge Function自体の動作確認はcurl（CORSの影響を受けない）で行うこと。
+- 全Edge Function（`post-comment` / `request-broadcaster` / `submit-contact`）共通で、CORS許可オリジン
+  （`ALLOWED_ORIGIN`シークレット）が本番ドメイン（`https://clip-vote.vercel.app`）に固定されているため、
+  `npm run dev`（localhost）からの呼び出しはブラウザのCORSで必ずブロックされる
+  （2026-09-02/03で複数回確認済み、私の変更が原因ではない。新しいEdge Functionを追加した場合も
+  同様に発生する前提で考えること）。Edge Function自体の動作確認はcurl（CORSの影響を受けない）で行うこと。
 
 ## 環境変数
 
@@ -266,3 +312,5 @@ Twitchクリップのランキング掲示板。いいね/よくないねの反�
 
 - git commitを行う際は、同じタイミングでリモート（origin）へのpushも必ず行うこと。ユーザーから別途pushを依頼されるのを待たない。
 - このリポジトリではOpenSSLバックエンドでCA証明書検証エラーが発生する環境のため、`git config http.sslBackend schannel` をローカルリポジトリ設定として適用済み（2026-09-02）。pushが失敗する場合はこの設定が外れていないか確認すること。
+- UIに装飾目的の絵文字（😲など）を使わないこと（2026-09-03、ユーザー指摘）。アイコンが必要な箇所は
+  既存パターンに倣って`lucide-react`のアイコンコンポーネントを使う。
