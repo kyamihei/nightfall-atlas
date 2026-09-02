@@ -301,22 +301,6 @@ $$ language plpgsql security definer;
 revoke execute on function refresh_ranking_views() from public;
 grant execute on function refresh_ranking_views() to service_role;
 
--- backfill-clip-creators.ts 専用のバルク更新RPC。
--- clips.title等はNOT NULL制約があり、PostgRESTのupsertはON CONFLICT DO UPDATEのみが実行される
--- 場合でもINSERT側の候補行としてNOT NULL列の値を要求してしまうため使えない（実測済み）。
--- UPDATE ... FROM jsonb_to_recordset(...) であれば指定した列だけを更新でき、
--- かつ1回のRPC呼び出しで最大100件まとめて更新できる。
-create or replace function bulk_update_clip_creators(updates jsonb)
-returns void as $$
-  update clips c
-  set creator_id = u.creator_id, creator_name = u.creator_name
-  from jsonb_to_recordset(updates) as u(id text, creator_id text, creator_name text)
-  where c.id = u.id;
-$$ language sql volatile security definer;
-
-revoke execute on function bulk_update_clip_creators(jsonb) from public;
-grant execute on function bulk_update_clip_creators(jsonb) to service_role;
-
 -- 人気配信者一覧（事前集計済みビューを読むだけなので高速）
 drop function if exists get_top_broadcasters(int);
 drop function if exists get_top_broadcasters(int, int);

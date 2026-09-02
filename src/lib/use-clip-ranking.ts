@@ -567,6 +567,43 @@ export function useTopBroadcasters(limit = 20, offset = 0) {
   return { broadcasters, loading };
 }
 
+export interface TopClipper {
+  creator_id: string;
+  creator_name: string;
+  total_views: number;
+  clip_count: number;
+  profile_image_url: string | null;
+}
+
+/**
+ * 人気クリッパー一覧（クリップを作った視聴者のランキング、合計視聴回数順）。
+ * 配信者ランキングと同じくget_top_broadcasters/get_top_clippersは事前集計済みの
+ * マテリアライズドビューを読むだけなので軽量（sync-twitch-clips.ts実行のたびに更新される）。
+ */
+export function useTopClippers(limit = 20, offset = 0) {
+  const [clippers, setClippers] = useState<TopClipper[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const { data, error } = await supabase.rpc("get_top_clippers", {
+        clipper_limit: limit,
+        clipper_offset: offset,
+      });
+      if (cancelled) return;
+      if (!error) setClippers(data ?? []);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [limit, offset]);
+
+  return { clippers, loading };
+}
+
 export interface BroadcasterProfile {
   clips: Clip[];
   tag: string | null;

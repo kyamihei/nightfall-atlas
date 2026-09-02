@@ -18,6 +18,7 @@ Twitchクリップのランキング掲示板。いいね/よくないねの反�
   - `BroadcasterList.jsx` / `BroadcasterDetail.jsx` - 配信者一覧・詳細（`/broadcasters`, `/broadcasters/:name`）
   - `MyReactions.jsx` - 自分が評価したクリップ一覧（`/my-reactions`）
   - `MyFavorites.jsx` - 自分がお気に入り登録したクリップ一覧（`/favorites`）
+  - `ClipperList.jsx` - クリッパー（クリップを作った視聴者）ランキング（`/clippers`）
 - `src/lib/supabase-client.ts` - Supabaseクライアント初期化＋匿名認証（`ensureAnonymousSession`）
 - `src/lib/use-clip-ranking.ts` - データ層フック集（`useClips` / `useReactions` / `useFavorites` / `useMyFavorites` / `useComments` / `useBroadcasterSearch` / `useBroadcasterRequest` / `useCommentReport` / `useBroadcasterAvatars` など）。`favorites`テーブル・RLSはSupabaseスキーマに元々あったがUIが未実装だったため2026-09-02に`useFavorites`/`useMyFavorites`とUIを追加して完成させた
 - `supabase/schema.sql`, `supabase/migrations/` - テーブル・RLS・トリガー・RPC定義
@@ -46,6 +47,34 @@ Twitchクリップのランキング掲示板。いいね/よくないねの反�
 - これらの変更は本番のSupabaseプロジェクト（ClipVote）に直接マイグレーションを適用済み
   （`supabase/migrations/20260902*.sql`）。ローカルでRPCの挙動を検証する際は
   `npx supabase db query --linked "<SQL>"`が使える（Docker不要、本番DBに直接クエリできる）。
+
+## クリッパーランキング（2026-09-02追加）
+
+- Twitchのクリップは配信者ではなく視聴者（クリッパー）が作っていることが多いという着想から、
+  「クリップを作った人」ランキングを追加（`/clippers`）。
+- Twitch Helix Get Clipsのレスポンスには元々`creator_id`/`creator_name`（クリッパー）が
+  含まれていたが、`broadcaster_id`/`broadcaster_name`（配信者）しか保存していなかった。
+  `clips.creator_id`/`creator_name`列を追加し、`sync-twitch-clips.ts`が今後の同期分から保存する。
+- 既存クリップ（導入時点で約39万件）分は`backfill-clip-creators.ts`（一回限りのスクリプト、
+  `deno run --allow-net --allow-env --env-file=<.env.human-providedのパス> backfill-clip-creators.ts`で実行）
+  でTwitch API（Get Clips、id指定で最大100件/回）から遡及取得済み（2026-09-02実施、389,421件処理、
+  389,361件で発見・99.98%）。Twitch側で見つからなかった分は`creator_id='__unknown__'`を入れて
+  再取得対象から除外している。
+  - **既知の制約**: バックフィル時、クリッパーのプロフィール（アイコン）を`tracked_clippers`に
+    登録する際にPostgRESTのデフォルト行数上限（1000件）を超えるSELECTを行っており、
+    実際は94,686人いるクリッパーのうち628人分しかアイコンが登録されていない
+    （ランキングの名前・視聴回数・クリップ数自体はclips側の列から取るため完全に正しい。
+    影響はアイコン画像が空のクリッパーが多い、という見た目だけ）。今後の同期分は正しく登録される。
+    全件のアイコンを揃えたい場合は、`tracked_clippers`に無い`creator_id`を`clips`から
+    正しくページネーションして抽出し直すバックフィルが別途必要。
+- **配信者ランキング（`get_top_broadcasters`）とクリッパーランキング（`get_top_clippers`）は、
+  clips全件を毎回集計すると匿名ロールのタイムアウトを超える**ため、事前集計した
+  マテリアライズドビュー（`top_broadcasters_mv` / `top_clippers_mv`）を読むだけの設計にしている。
+  `sync-twitch-clips.ts`が同期完了後に`refresh_ranking_views()` RPC（service_role専用）を呼んで
+  `REFRESH MATERIALIZED VIEW CONCURRENTLY`する。**この2つのランキングはsync/backfillを実行した
+  タイミングでしか更新されない**（リアルタイムではない）ことを踏まえて機能追加すること。
+  - この修正で、以前から本番で壊れていた配信者一覧ページ（`該当する配信者が見つかりませんでした`と
+    表示されていた）も直っている（クリッパー機能の実装中に偶然発見・修正した既存バグ）。
 
 ## 認証
 

@@ -251,15 +251,14 @@ returns table(clip_id text, likes bigint, dislikes bigint) as $$
   group by clip_id;
 $$ language sql stable;
 
--- ============================================================
--- 配信者/クリッパーランキングの事前集計ビュー
--- ============================================================
--- streamer/creator_id単位の集計（sum/group by）はclips全件（数十万行）を毎回スキャンする必要があり、
--- 匿名ロール(anon)のstatement_timeout=3sを本番実測で超える（get_ranked_clipsで踏んだのと同じ罠）。
--- 集計はsync-twitch-clips.ts実行のたびに更新すれば十分な鮮度のため、
--- マテリアライズドビューとして事前計算し、RPCはそれを読むだけにする。
-drop materialized view if exists top_broadcasters_mv;
-create materialized view top_broadcasters_mv as
+-- 人気配信者一覧
+-- クリップの合計視聴回数が多い順に配信者を返す。配信者一覧ページ用にoffsetでのページネーション、
+-- tracked_broadcastersとのLEFT JOINで所属グループタグ・アイコン画像URLも一緒に返す。
+-- 戻り値の列構成が変わるため、create or replaceの前にdropしておく（Postgresの制約）。
+drop function if exists get_top_broadcasters(int);
+drop function if exists get_top_broadcasters(int, int);
+create or replace function get_top_broadcasters(broadcaster_limit int default 20, broadcaster_offset int default 0)
+returns table(streamer text, total_views bigint, clip_count bigint, tag text, profile_image_url text) as $$
   select c.streamer,
     sum(c.view_count) as total_views,
     count(*) as clip_count,
@@ -267,14 +266,16 @@ create materialized view top_broadcasters_mv as
     max(tb.profile_image_url) as profile_image_url
   from clips c
   left join tracked_broadcasters tb on tb.broadcaster_name = c.streamer
-  group by c.streamer;
+  group by c.streamer
+  order by total_views desc
+  limit broadcaster_limit offset broadcaster_offset;
+$$ language sql stable;
 
--- REFRESH ... CONCURRENTLYには一意索引が必須（無いと参照中の読み取りをロックしてしまう）
-create unique index if not exists idx_top_broadcasters_mv_streamer on top_broadcasters_mv(streamer);
-create index if not exists idx_top_broadcasters_mv_views on top_broadcasters_mv(total_views desc);
-
-drop materialized view if exists top_clippers_mv;
-create materialized view top_clippers_mv as
+-- 人気クリッパー一覧（クリップを作った視聴者のランキング）
+-- 合計視聴回数が多い順。creator_idがnullのクリップ（backfill未実施・取得失敗分）は対象外にする。
+drop function if exists get_top_clippers(int, int);
+create or replace function get_top_clippers(clipper_limit int default 20, clipper_offset int default 0)
+returns table(creator_id text, creator_name text, total_views bigint, clip_count bigint, profile_image_url text) as $$
   select c.creator_id,
     max(c.creator_name) as creator_name,
     sum(c.view_count) as total_views,
@@ -283,57 +284,7 @@ create materialized view top_clippers_mv as
   from clips c
   left join tracked_clippers tc on tc.creator_id = c.creator_id
   where c.creator_id is not null
-  group by c.creator_id;
-
-create unique index if not exists idx_top_clippers_mv_creator on top_clippers_mv(creator_id);
-create index if not exists idx_top_clippers_mv_views on top_clippers_mv(total_views desc);
-
--- sync-twitch-clips.ts が同期完了後に呼び出す。service_roleのみ実行可（匿名/認証ユーザーからの
--- 乱用によるリフレッシュ連打を防ぐため、publicへのEXECUTE権限を明示的に外している）。
-create or replace function refresh_ranking_views()
-returns void as $$
-begin
-  refresh materialized view concurrently top_broadcasters_mv;
-  refresh materialized view concurrently top_clippers_mv;
-end;
-$$ language plpgsql security definer;
-
-revoke execute on function refresh_ranking_views() from public;
-grant execute on function refresh_ranking_views() to service_role;
-
--- backfill-clip-creators.ts 専用のバルク更新RPC。
--- clips.title等はNOT NULL制約があり、PostgRESTのupsertはON CONFLICT DO UPDATEのみが実行される
--- 場合でもINSERT側の候補行としてNOT NULL列の値を要求してしまうため使えない（実測済み）。
--- UPDATE ... FROM jsonb_to_recordset(...) であれば指定した列だけを更新でき、
--- かつ1回のRPC呼び出しで最大100件まとめて更新できる。
-create or replace function bulk_update_clip_creators(updates jsonb)
-returns void as $$
-  update clips c
-  set creator_id = u.creator_id, creator_name = u.creator_name
-  from jsonb_to_recordset(updates) as u(id text, creator_id text, creator_name text)
-  where c.id = u.id;
-$$ language sql volatile security definer;
-
-revoke execute on function bulk_update_clip_creators(jsonb) from public;
-grant execute on function bulk_update_clip_creators(jsonb) to service_role;
-
--- 人気配信者一覧（事前集計済みビューを読むだけなので高速）
-drop function if exists get_top_broadcasters(int);
-drop function if exists get_top_broadcasters(int, int);
-create or replace function get_top_broadcasters(broadcaster_limit int default 20, broadcaster_offset int default 0)
-returns table(streamer text, total_views bigint, clip_count bigint, tag text, profile_image_url text) as $$
-  select streamer, total_views, clip_count, tag, profile_image_url
-  from top_broadcasters_mv
-  order by total_views desc
-  limit broadcaster_limit offset broadcaster_offset;
-$$ language sql stable;
-
--- 人気クリッパー一覧（クリップを作った視聴者のランキング。事前集計済みビューを読むだけ）
-drop function if exists get_top_clippers(int, int);
-create or replace function get_top_clippers(clipper_limit int default 20, clipper_offset int default 0)
-returns table(creator_id text, creator_name text, total_views bigint, clip_count bigint, profile_image_url text) as $$
-  select creator_id, creator_name, total_views, clip_count, profile_image_url
-  from top_clippers_mv
+  group by c.creator_id
   order by total_views desc
   limit clipper_limit offset clipper_offset;
 $$ language sql stable;

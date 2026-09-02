@@ -66,6 +66,8 @@ interface TwitchClip {
   id: string;
   broadcaster_id: string;
   broadcaster_name: string;
+  creator_id: string; // クリップを作った視聴者（クリッパー）。配信者(broadcaster)とは別人
+  creator_name: string;
   title: string;
   view_count: number;
   thumbnail_url: string;
@@ -429,6 +431,8 @@ async function main() {
     view_count: clip.view_count,
     thumbnail_url: clip.thumbnail_url,
     twitch_created_at: clip.created_at,
+    creator_id: clip.creator_id || null,
+    creator_name: clip.creator_name || null,
   }));
 
   for (let i = 0; i < rows.length; i += 100) {
@@ -436,6 +440,33 @@ async function main() {
     const { error } = await supabase.from("clips").upsert(chunk, { onConflict: "id" });
     if (error) console.error("clipsのupsertに失敗:", error.message);
   }
+
+  // 4. クリッパー（クリップ作者）のプロフィールをtracked_clippersに蓄積する。
+  //    tracked_broadcastersと同じ発想で、アイコン画像はGet Usersでまとめて取得する。
+  const clipperEntries = new Map<string, string>(); // creator_id -> creator_name
+  for (const clip of uniqueClips) {
+    if (clip.creator_id) clipperEntries.set(clip.creator_id, clip.creator_name);
+  }
+  if (clipperEntries.size > 0) {
+    const clipperAvatars = await fetchProfileImages(token, [...clipperEntries.keys()]);
+    const clipperRows = [...clipperEntries.entries()].map(([creator_id, creator_name]) => ({
+      creator_id,
+      creator_name,
+      last_seen_at: new Date().toISOString(),
+      profile_image_url: clipperAvatars.get(creator_id) ?? null,
+    }));
+    for (let i = 0; i < clipperRows.length; i += 100) {
+      const chunk = clipperRows.slice(i, i + 100);
+      const { error } = await supabase.from("tracked_clippers").upsert(chunk, { onConflict: "creator_id" });
+      if (error) console.error("tracked_clippersのupsertに失敗:", error.message);
+    }
+    console.log(`クリッパー ${clipperRows.length}人分のプロフィールを更新しました`);
+  }
+
+  // 5. 配信者/クリッパーランキングの事前集計ビューを更新する（RPC経由、clips全件の
+  //    ライブ集計は匿名ロールのタイムアウトを超えるため、事前計算を使う設計になっている）
+  const { error: refreshErr } = await supabase.rpc("refresh_ranking_views");
+  if (refreshErr) console.error("ランキング集計ビューの更新に失敗:", refreshErr.message);
 
   console.log("クリップ同期が完了しました。");
 }

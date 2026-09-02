@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, Users, ListChecks, Film, Star, CornerUpLeft } from "lucide-react";
+import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, Users, ListChecks, Film, Star, CornerUpLeft, Scissors } from "lucide-react";
 import {
   useClips,
   useReactions,
@@ -569,6 +569,10 @@ export default function ClipRanking() {
             <Link to="/broadcasters" style={styles.broadcastersLink}>
               <Users size={13} />
               配信者一覧
+            </Link>
+            <Link to="/clippers" style={styles.broadcastersLink}>
+              <Scissors size={13} />
+              クリッパー
             </Link>
             <Link to="/my-reactions" style={styles.broadcastersLink}>
               <ListChecks size={13} />
