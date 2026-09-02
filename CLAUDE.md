@@ -5,7 +5,7 @@ Twitchクリップのランキング掲示板。いいね/よくないねの反�
 
 ## 技術構成
 
-- フロント: React 19 + Vite + react-router-dom。UIはstyleオブジェクトによるインラインCSS（外部CSSフレームワークなし）
+- フロント: React 19 + Vite + react-router-dom。UIはstyleオブジェクトによるインラインCSS（外部CSSフレームワークなし）。`src/styles/theme.css`（`main.jsx`でグローバル読み込み）に全ページ共通の演出（フォント読み込み・スクロールバー・ボタン押下フィードバック・フォーカスリング・`cv-`接頭辞の共通アニメーションクラス）を集約している
 - バックエンド: Supabase（Postgres + Auth匿名サインイン + Edge Functions + Realtime）
 - クリップ同期: `sync-twitch-clips.ts`（Deno）がTwitch Helix APIから定期的にクリップを取得し、Supabaseへ書き込む
 - 自動実行: `.github/workflows/sync-clips.yml` がGitHub Actionsで毎朝JST 6:05頃に同期バッチを実行（`workflow_dispatch`で手動実行も可）

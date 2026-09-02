@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, Users, ListChecks } from "lucide-react";
+import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, Users, ListChecks, Film } from "lucide-react";
 import {
   useClips,
   useReactions,
@@ -60,6 +60,13 @@ function formatViews(n) {
   return new Intl.NumberFormat("ja-JP").format(n);
 }
 
+const RANK_ACCENTS = { 1: "#FFC857", 2: "#C9CEDA", 3: "#D98E5D" };
+
+// 上位3位だけ金・銀・銅のアクセントカラーを付ける
+function getRankAccent(rank) {
+  return RANK_ACCENTS[rank] || null;
+}
+
 function timeAgo(ts) {
   const diff = Math.max(0, Date.now() - ts);
   const min = Math.floor(diff / 60000);
@@ -93,25 +100,31 @@ function ClipRow({
   }, [clip.id, comments, submit, submitting, error, onCommentsUpdate]);
 
   const tagStyle = getTagColor(clip.game);
+  const rankAccent = getRankAccent(clip.rank);
 
   return (
     <div
+      className="cv-fade-in-up"
       style={{
         ...styles.row,
         cursor: "pointer",
         background: hovered ? "#22222E" : styles.row.background,
-        border: hovered ? "1px solid #33333F" : styles.row.border,
+        borderColor: hovered ? "#33333F" : rankAccent ? `${rankAccent}55` : styles.row.borderColor,
+        boxShadow: hovered ? "0 4px 16px rgba(0,0,0,0.28)" : "none",
+        transform: hovered ? "translateY(-1px)" : "translateY(0)",
+        animationDelay: `${Math.min(clip.rank - 1, 12) * 40}ms`,
       }}
       onClick={() => onOpenComments(clip.id)}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <div style={styles.rowMain}>
+      <div className="cv-row-main" style={styles.rowMain}>
         <div
           className="clip-rank-num"
           style={{
             ...styles.rankNum,
-            color: clip.rank === 1 ? "#FFC857" : "#565660",
+            color: rankAccent || "#565660",
+            textShadow: rankAccent ? `0 0 14px ${rankAccent}66` : "none",
           }}
         >
           {String(clip.rank).padStart(2, "0")}
@@ -168,7 +181,7 @@ function ClipRow({
           </p>
         </div>
 
-        <div style={styles.actions}>
+        <div className="cv-row-actions" style={styles.actions}>
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -218,7 +231,7 @@ function ClipRow({
       </div>
 
       {playerOpen && (
-        <div style={styles.playerPanel} onClick={(e) => e.stopPropagation()}>
+        <div className="cv-fade-in" style={styles.playerPanel} onClick={(e) => e.stopPropagation()}>
           <iframe
             src={`https://clips.twitch.tv/embed?clip=${clip.id}&parent=${window.location.hostname}&autoplay=false`}
             style={styles.playerFrame}
@@ -258,7 +271,7 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
   }
 
   return (
-    <div style={styles.commentSidebar}>
+    <div className="cv-slide-in-right" style={styles.commentSidebar}>
       <div style={styles.commentSidebarHeader}>
         <p style={styles.commentSidebarTitle}>{clip.title}</p>
         <button onClick={onClose} style={styles.closeBtn} aria-label="コメントを閉じる">
@@ -333,6 +346,27 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
   );
 }
 
+/** 読み込み中に表示するクリップ行の骨組み（レイアウトのガタつきを防ぐ） */
+function SkeletonRow({ delay }) {
+  return (
+    <div style={{ ...styles.row, animationDelay: `${delay}ms` }} className="cv-fade-in-up">
+      <div style={styles.rowMain}>
+        <div className="cv-skeleton" style={styles.skeletonRank} />
+        <div className="cv-skeleton" style={styles.skeletonThumb} />
+        <div style={{ ...styles.infoCol, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div className="cv-skeleton" style={styles.skeletonTitle} />
+          <div className="cv-skeleton" style={styles.skeletonMeta} />
+        </div>
+        <div style={styles.actions}>
+          <div className="cv-skeleton" style={styles.skeletonPill} />
+          <div className="cv-skeleton" style={styles.skeletonPill} />
+          <div className="cv-skeleton" style={styles.skeletonPill} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const PAGE_SIZE = 20;
 
 export default function ClipRanking() {
@@ -366,6 +400,20 @@ export default function ClipRanking() {
     setPage(1);
   }, [period, selectedDay, searchQuery]);
 
+  // コメントパネルを開いている間はEscで閉じられるようにし、背後のページスクロールを止める
+  useEffect(() => {
+    if (!activeCommentClipId) return;
+    function handleKeyDown(e) {
+      if (e.key === "Escape") setActiveCommentClipId(null);
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = "";
+    };
+  }, [activeCommentClipId]);
+
   function toggleComments(clipId) {
     setActiveCommentClipId((prev) => (prev === clipId ? null : clipId));
   }
@@ -386,16 +434,6 @@ export default function ClipRanking() {
     requestBroadcaster(name);
   }
 
-  if (loading) {
-    return (
-      <div style={styles.loadingWrap}>
-        <Loader2 size={22} style={{ animation: "spin 1s linear infinite" }} />
-        <span style={{ marginLeft: 10 }}>読み込み中…</span>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-      </div>
-    );
-  }
-
   const rankedClips = clips.map((c, i) => ({ ...c, rank: i + 1 }));
   const visibleClips = rankedClips.filter((c) => {
     if (searchQuery.trim() && !c.streamer.toLowerCase().includes(searchQuery.trim().toLowerCase())) {
@@ -408,18 +446,24 @@ export default function ClipRanking() {
   return (
     <div style={styles.page}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
-        * { box-sizing: border-box; font-family: 'Inter', sans-serif; }
+        * { font-family: 'Inter', sans-serif; }
         .clip-rank-num { font-family: 'Oswald', sans-serif; }
         .clip-title-font { font-family: 'Oswald', sans-serif; }
         button { cursor: pointer; }
         textarea:focus, input:focus { outline: 2px solid #FF4D6D33; }
+        @media (max-width: 640px) {
+          .cv-header { flex-direction: column; align-items: flex-start; }
+          .cv-header-controls { align-items: flex-start; width: 100%; }
+          .cv-search-box { width: 100%; }
+          .cv-row-main { flex-wrap: wrap; row-gap: 10px; }
+          .cv-row-actions { flex-basis: 100%; justify-content: flex-end; }
+        }
       `}</style>
 
-      <header style={styles.header}>
+      <header className="cv-header" style={styles.header}>
         <div>
           <div style={styles.eyebrowRow}>
-            <span style={styles.liveDot} />
+            <span className="cv-live-dot" style={styles.liveDot} />
             <span style={styles.eyebrow}>デイリークリップランキング</span>
           </div>
           <h1 className="clip-title-font" style={styles.h1}>
@@ -427,7 +471,7 @@ export default function ClipRanking() {
           </h1>
           <p style={styles.tagline}>視聴回数順のクリップランキング</p>
         </div>
-        <div style={styles.headerControls}>
+        <div className="cv-header-controls" style={styles.headerControls}>
           <div style={styles.headerLinks}>
             <Link to="/broadcasters" style={styles.broadcastersLink}>
               <Users size={13} />
@@ -438,7 +482,7 @@ export default function ClipRanking() {
               評価した動画
             </Link>
           </div>
-          <div style={styles.searchBox}>
+          <div className="cv-search-box" style={styles.searchBox}>
             <Search size={14} color="#6B6B78" />
             <input
               value={searchQuery}
@@ -479,17 +523,30 @@ export default function ClipRanking() {
       {clipsError && <div style={styles.errorBanner}>{clipsError}</div>}
 
       <div style={styles.list}>
-        {visibleClips.length === 0 && !showNoResultRequest && (
-          <div style={styles.emptyState}>まだクリップがありません。</div>
+        {loading && (
+          <>
+            {Array.from({ length: 6 }).map((_, i) => (
+              <SkeletonRow key={i} delay={i * 40} />
+            ))}
+          </>
         )}
-        {showNoResultRequest && (
+        {!loading && visibleClips.length === 0 && !showNoResultRequest && (
+          <div style={styles.emptyState}>
+            <Film size={26} color="#3E3E4A" style={{ marginBottom: 10 }} />
+            <p style={{ margin: 0 }}>まだクリップがありません。</p>
+          </div>
+        )}
+        {!loading && showNoResultRequest && (
           <div style={styles.requestCard}>
             <div style={styles.requestHead}>
               <UserPlus size={16} color="#FF4D6D" />
               <p style={styles.requestTitle}>「{searchQuery}」に一致する配信者は見つかりませんでした</p>
             </div>
             {broadcasterSearching ? (
-              <p style={styles.requestSub}>検索中…</p>
+              <p style={{ ...styles.requestSub, display: "flex", alignItems: "center", gap: 6 }}>
+                <Loader2 size={13} style={{ animation: "cv-spin 1s linear infinite" }} />
+                検索中…
+              </p>
             ) : broadcasterResults.length > 0 ? (
               <p style={styles.requestSub}>
                 「{searchQuery}」は登録済みの配信者です。現在ランキング対象のクリップはありません。
@@ -528,26 +585,27 @@ export default function ClipRanking() {
             )}
           </div>
         )}
-        {visibleClips.map((clip) => {
-          const stats = counts[clip.id] || { likes: 0, dislikes: 0 };
-          return (
-            <ClipRow
-              key={clip.id}
-              clip={clip}
-              likes={stats.likes}
-              dislikes={stats.dislikes}
-              myVote={myVotes[clip.id]}
-              onVote={vote}
-              commentsActive={activeCommentClipId === clip.id}
-              onOpenComments={toggleComments}
-              onCommentsUpdate={handleCommentsUpdate}
-              avatarUrl={avatars[clip.streamer]}
-            />
-          );
-        })}
+        {!loading &&
+          visibleClips.map((clip) => {
+            const stats = counts[clip.id] || { likes: 0, dislikes: 0 };
+            return (
+              <ClipRow
+                key={clip.id}
+                clip={clip}
+                likes={stats.likes}
+                dislikes={stats.dislikes}
+                myVote={myVotes[clip.id]}
+                onVote={vote}
+                commentsActive={activeCommentClipId === clip.id}
+                onOpenComments={toggleComments}
+                onCommentsUpdate={handleCommentsUpdate}
+                avatarUrl={avatars[clip.streamer]}
+              />
+            );
+          })}
       </div>
 
-      {!searchQuery.trim() && totalCount > PAGE_SIZE && (
+      {!loading && !searchQuery.trim() && totalCount > PAGE_SIZE && (
         <div style={styles.pagination}>
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
@@ -579,16 +637,23 @@ export default function ClipRanking() {
         const activeClip = clips.find((c) => c.id === activeCommentClipId);
         if (!activeClip) return null;
         return (
-          <CommentSidebar
-            key={activeClip.id}
-            clip={activeClip}
-            commentsData={commentsDataByClip[activeClip.id]}
-            nameDraft={nameDraft}
-            onNameDraftChange={setNameDraft}
-            reportedIds={reportedIds}
-            onReport={handleReport}
-            onClose={() => setActiveCommentClipId(null)}
-          />
+          <>
+            <div
+              className="cv-fade-in"
+              style={styles.commentBackdrop}
+              onClick={() => setActiveCommentClipId(null)}
+            />
+            <CommentSidebar
+              key={activeClip.id}
+              clip={activeClip}
+              commentsData={commentsDataByClip[activeClip.id]}
+              nameDraft={nameDraft}
+              onNameDraftChange={setNameDraft}
+              reportedIds={reportedIds}
+              onReport={handleReport}
+              onClose={() => setActiveCommentClipId(null)}
+            />
+          </>
         );
       })()}
     </div>
@@ -603,15 +668,6 @@ const styles = {
     padding: "28px 32px 40px",
     maxWidth: 1200,
     margin: "0 auto",
-  },
-  loadingWrap: {
-    minHeight: "100vh",
-    background: "#14141B",
-    color: "#8A8A99",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontFamily: "Inter, sans-serif",
   },
   header: {
     display: "flex",
@@ -710,8 +766,11 @@ const styles = {
   emptyState: {
     color: "#6B6B78",
     fontSize: 14,
-    padding: "40px 0",
+    padding: "48px 0",
     textAlign: "center",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
   },
   requestCard: {
     background: "#1C1C26",
@@ -746,12 +805,19 @@ const styles = {
   requestNote: { fontSize: 11.5, color: "#4E4E58", margin: "12px 0 0", lineHeight: 1.5 },
   row: {
     background: "#1C1C26",
-    border: "1px solid #24242F",
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "#24242F",
     borderRadius: 10,
     padding: "14px 16px",
-    transition: "background-color 0.15s ease, border-color 0.15s ease",
+    transition: "background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease",
   },
   rowMain: { display: "flex", alignItems: "center", gap: 14 },
+  skeletonRank: { width: 34, height: 26, borderRadius: 4, flexShrink: 0 },
+  skeletonThumb: { width: 64, height: 44, borderRadius: 6, flexShrink: 0 },
+  skeletonTitle: { width: "70%", height: 14, borderRadius: 4 },
+  skeletonMeta: { width: "40%", height: 11, borderRadius: 4 },
+  skeletonPill: { width: 52, height: 26, borderRadius: 8 },
   rankNum: { fontSize: 26, fontWeight: 600, width: 34, flexShrink: 0 },
   thumb: {
     width: 64,
@@ -812,6 +878,12 @@ const styles = {
     aspectRatio: "16 / 9",
     border: "none",
     borderRadius: 8,
+  },
+  commentBackdrop: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(10,10,14,0.55)",
+    zIndex: 49,
   },
   commentSidebar: {
     position: "fixed",

@@ -1,0 +1,166 @@
+/* ClipVote 共通テーマ
+   ダークUI・コーラルレッド(#FF4D6D)を基調にした全ページ共通の演出をここに集約する。
+   各ページのインラインstyleオブジェクトはそのまま維持し、ここでは
+   フォント読み込み・スクロールバー・押下/フォーカスの触感・共通アニメーションだけを担う。 */
+
+@import url("https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&display=swap");
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: #14141b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: #ff4d6d55;
+  color: #fff;
+}
+
+/* ダークテーマに合わせた細身のスクロールバー */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #34343f #14141b;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: #34343f;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #45454f;
+  background-clip: padding-box;
+}
+
+/* キーボード操作時のみリングを出す（マウスクリックでは出さない） */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid #ff4d6d;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* すべてのボタン/リンクに軽い押下フィードバックを与える */
+button,
+a {
+  transition: transform 0.12s ease, opacity 0.12s ease;
+}
+button:active:not(:disabled),
+a:active {
+  transform: scale(0.96);
+}
+button:disabled {
+  cursor: default;
+}
+
+/* margin-topでスライドインを表現する（transformで実装すると、要素側でホバー時に
+   inline styleで独自にtransformを使う場合にアニメーション終了後も値が固定されて
+   上書きできなくなるため、あえて別のプロパティを使う） */
+@keyframes cv-fade-in-up {
+  from {
+    opacity: 0;
+    margin-top: 6px;
+  }
+  to {
+    opacity: 1;
+    margin-top: 0;
+  }
+}
+
+@keyframes cv-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes cv-slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes cv-pop {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.28);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes cv-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes cv-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.cv-fade-in-up {
+  animation: cv-fade-in-up 0.35s ease both;
+}
+
+.cv-fade-in {
+  animation: cv-fade-in 0.2s ease both;
+}
+
+.cv-skeleton {
+  background: linear-gradient(90deg, #1c1c26 25%, #23232f 37%, #1c1c26 63%);
+  background-size: 400% 100%;
+  animation: cv-shimmer 1.4s ease infinite;
+}
+
+.cv-pop {
+  animation: cv-pop 0.28s ease;
+}
+
+.cv-slide-in-right {
+  animation: cv-slide-in-right 0.25s ease both;
+}
+
+.cv-live-dot {
+  animation: cv-live-pulse 1.6s ease-in-out infinite;
+}
+@keyframes cv-live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 #ff4d6d66;
+  }
+  50% {
+    opacity: 0.55;
+    box-shadow: 0 0 0 4px transparent;
+  }
+}
