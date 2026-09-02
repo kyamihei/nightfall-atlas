@@ -94,7 +94,10 @@ function ClipRow({
   const tagStyle = getTagColor(clip.game);
 
   return (
-    <div style={styles.row}>
+    <div
+      style={{ ...styles.row, cursor: "pointer" }}
+      onClick={() => onOpenComments(clip.id)}
+    >
       <div style={styles.rowMain}>
         <div
           className="clip-rank-num"
@@ -107,7 +110,10 @@ function ClipRow({
         </div>
 
         <button
-          onClick={() => setPlayerOpen((o) => !o)}
+          onClick={(e) => {
+            e.stopPropagation();
+            setPlayerOpen((o) => !o);
+          }}
           style={{
             ...styles.thumb,
             background: clip.thumbnail_url ? "transparent" : tagStyle.bg,
@@ -130,11 +136,19 @@ function ClipRow({
         </button>
 
         <div style={styles.infoCol}>
-          <Link to={`/clips/${clip.id}`} style={styles.clipTitleLink}>
+          <Link
+            to={`/clips/${clip.id}`}
+            style={styles.clipTitleLink}
+            onClick={(e) => e.stopPropagation()}
+          >
             <p className="clip-title-font" style={styles.clipTitle}>{clip.title}</p>
           </Link>
           <p style={styles.metaLine}>
-            <Link to={`/broadcasters/${encodeURIComponent(clip.streamer)}`} style={styles.streamerLink}>
+            <Link
+              to={`/broadcasters/${encodeURIComponent(clip.streamer)}`}
+              style={styles.streamerLink}
+              onClick={(e) => e.stopPropagation()}
+            >
               {avatarUrl ? (
                 <img src={avatarUrl} alt="" style={styles.rowAvatar} />
               ) : (
@@ -148,7 +162,10 @@ function ClipRow({
 
         <div style={styles.actions}>
           <button
-            onClick={() => onVote(clip.id, "like")}
+            onClick={(e) => {
+              e.stopPropagation();
+              onVote(clip.id, "like");
+            }}
             style={{
               ...styles.actionBtn,
               color: myVote === "like" ? "#FF4D6D" : "#8A8A99",
@@ -160,7 +177,10 @@ function ClipRow({
             {likes}
           </button>
           <button
-            onClick={() => onVote(clip.id, "dislike")}
+            onClick={(e) => {
+              e.stopPropagation();
+              onVote(clip.id, "dislike");
+            }}
             style={{
               ...styles.actionBtn,
               color: myVote === "dislike" ? "#4DD8FF" : "#8A8A99",
@@ -172,7 +192,10 @@ function ClipRow({
             {dislikes}
           </button>
           <button
-            onClick={() => onOpenComments(clip.id)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenComments(clip.id);
+            }}
             style={{
               ...styles.actionBtn,
               color: commentsActive ? "#EDEDF2" : "#8A8A99",
@@ -187,7 +210,7 @@ function ClipRow({
       </div>
 
       {playerOpen && (
-        <div style={styles.playerPanel}>
+        <div style={styles.playerPanel} onClick={(e) => e.stopPropagation()}>
           <iframe
             src={`https://clips.twitch.tv/embed?clip=${clip.id}&parent=${window.location.hostname}&autoplay=false`}
             style={styles.playerFrame}
