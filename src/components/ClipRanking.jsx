@@ -86,6 +86,7 @@ function ClipRow({
   const commentsState = useComments(clip.id);
   const { comments, submit, submitting, error } = commentsState;
   const [playerOpen, setPlayerOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
 
   useEffect(() => {
     onCommentsUpdate(clip.id, { comments, submit, submitting, error });
@@ -95,9 +96,15 @@ function ClipRow({
 
   return (
     <div
-      className="clip-row"
-      style={{ ...styles.row, cursor: "pointer" }}
+      style={{
+        ...styles.row,
+        cursor: "pointer",
+        background: hovered ? "#22222E" : styles.row.background,
+        border: hovered ? "1px solid #33333F" : styles.row.border,
+      }}
       onClick={() => onOpenComments(clip.id)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
       <div style={styles.rowMain}>
         <div
@@ -407,8 +414,6 @@ export default function ClipRanking() {
         .clip-title-font { font-family: 'Oswald', sans-serif; }
         button { cursor: pointer; }
         textarea:focus, input:focus { outline: 2px solid #FF4D6D33; }
-        .clip-row { transition: background-color 0.15s ease, border-color 0.15s ease; }
-        .clip-row:hover { background: #22222E; border-color: #33333F; }
       `}</style>
 
       <header style={styles.header}>
@@ -744,6 +749,7 @@ const styles = {
     border: "1px solid #24242F",
     borderRadius: 10,
     padding: "14px 16px",
+    transition: "background-color 0.15s ease, border-color 0.15s ease",
   },
   rowMain: { display: "flex", alignItems: "center", gap: 14 },
   rankNum: { fontSize: 26, fontWeight: 600, width: 34, flexShrink: 0 },
