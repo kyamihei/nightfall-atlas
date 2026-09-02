@@ -39,7 +39,7 @@ export default function ClipperList() {
           </Link>
           <h1 className="clip-title-font" style={styles.h1}>
             <Scissors size={22} style={{ marginRight: 8, verticalAlign: -3 }} />
-            クリッパーランキング
+            クリップ職人ランキング
           </h1>
           <p style={styles.tagline}>
             クリップを作った視聴者を、そのクリップの合計視聴回数順に表示しています
@@ -53,7 +53,7 @@ export default function ClipperList() {
         <>
           <div style={styles.list}>
             {clippers.length === 0 && (
-              <div style={styles.emptyState}>まだクリッパーの記録がありません。</div>
+              <div style={styles.emptyState}>まだクリップ職人の記録がありません。</div>
             )}
             {clippers.map((c, i) => {
               const rank = (page - 1) * PAGE_SIZE + i + 1;

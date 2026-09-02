@@ -18,7 +18,7 @@ Twitchクリップのランキング掲示板。いいね/よくないねの反�
   - `BroadcasterList.jsx` / `BroadcasterDetail.jsx` - 配信者一覧・詳細（`/broadcasters`, `/broadcasters/:name`）
   - `MyReactions.jsx` - 自分が評価したクリップ一覧（`/my-reactions`）
   - `MyFavorites.jsx` - 自分がお気に入り登録したクリップ一覧（`/favorites`）
-  - `ClipperList.jsx` - クリッパー（クリップを作った視聴者）ランキング（`/clippers`）
+  - `ClipperList.jsx` - クリップ職人（クリップを作った視聴者）ランキング（`/clippers`。コンポーネント名/ルートは内部的に"clipper"のまま、UI表示名のみ「クリップ職人」）
 - `src/lib/supabase-client.ts` - Supabaseクライアント初期化＋匿名認証（`ensureAnonymousSession`）
 - `src/lib/use-clip-ranking.ts` - データ層フック集（`useClips` / `useReactions` / `useFavorites` / `useMyFavorites` / `useComments` / `useBroadcasterSearch` / `useBroadcasterRequest` / `useCommentReport` / `useBroadcasterAvatars` など）。`favorites`テーブル・RLSはSupabaseスキーマに元々あったがUIが未実装だったため2026-09-02に`useFavorites`/`useMyFavorites`とUIを追加して完成させた
 - `supabase/schema.sql`, `supabase/migrations/` - テーブル・RLS・トリガー・RPC定義
@@ -48,7 +48,7 @@ Twitchクリップのランキング掲示板。いいね/よくないねの反�
   （`supabase/migrations/20260902*.sql`）。ローカルでRPCの挙動を検証する際は
   `npx supabase db query --linked "<SQL>"`が使える（Docker不要、本番DBに直接クエリできる）。
 
-## クリッパーランキング（2026-09-02追加）
+## クリップ職人ランキング（2026-09-02追加、UI表示名は当初「クリッパーランキング」だったが改名）
 
 - Twitchのクリップは配信者ではなく視聴者（クリッパー）が作っていることが多いという着想から、
   「クリップを作った人」ランキングを追加（`/clippers`）。

@@ -572,7 +572,7 @@ export default function ClipRanking() {
             </Link>
             <Link to="/clippers" style={styles.broadcastersLink}>
               <Scissors size={13} />
-              クリッパー
+              クリップ職人
             </Link>
             <Link to="/my-reactions" style={styles.broadcastersLink}>
               <ListChecks size={13} />

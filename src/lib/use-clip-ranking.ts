@@ -576,7 +576,7 @@ export interface TopClipper {
 }
 
 /**
- * 人気クリッパー一覧（クリップを作った視聴者のランキング、合計視聴回数順）。
+ * 人気クリップ職人一覧（クリップを作った視聴者のランキング、合計視聴回数順）。
  * 配信者ランキングと同じくget_top_broadcasters/get_top_clippersは事前集計済みの
  * マテリアライズドビューを読むだけなので軽量（sync-twitch-clips.ts実行のたびに更新される）。
  */
