@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, Users, ListChecks, Film } from "lucide-react";
+import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, Users, ListChecks, Film, Star } from "lucide-react";
 import {
   useClips,
   useReactions,
+  useFavorites,
   useComments,
   useBroadcasterSearch,
   useBroadcasterRequest,
@@ -83,6 +84,8 @@ function ClipRow({
   dislikes,
   myVote,
   onVote,
+  isFavorited,
+  onToggleFavorite,
   commentsActive,
   onOpenComments,
   onCommentsUpdate,
@@ -94,6 +97,11 @@ function ClipRow({
   const { comments, submit, submitting, error } = commentsState;
   const [playerOpen, setPlayerOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
+  // クリックのたびに1増やし、keyに使うことでアイコンを再マウントさせ、cv-popのバウンド
+  // アニメーションを毎回リプレイさせる（0のままの初期表示ではアニメーションさせない）
+  const [likeBump, setLikeBump] = useState(0);
+  const [dislikeBump, setDislikeBump] = useState(0);
+  const [favBump, setFavBump] = useState(0);
 
   useEffect(() => {
     onCommentsUpdate(clip.id, { comments, submit, submitting, error });
@@ -185,6 +193,7 @@ function ClipRow({
           <button
             onClick={(e) => {
               e.stopPropagation();
+              setLikeBump((n) => n + 1);
               onVote(clip.id, "like");
             }}
             style={{
@@ -194,12 +203,18 @@ function ClipRow({
             }}
             aria-label="いいね"
           >
-            <Heart size={15} fill={myVote === "like" ? "#FF4D6D" : "none"} />
+            <Heart
+              key={likeBump}
+              className={likeBump > 0 ? "cv-pop" : undefined}
+              size={15}
+              fill={myVote === "like" ? "#FF4D6D" : "none"}
+            />
             {likes}
           </button>
           <button
             onClick={(e) => {
               e.stopPropagation();
+              setDislikeBump((n) => n + 1);
               onVote(clip.id, "dislike");
             }}
             style={{
@@ -209,7 +224,12 @@ function ClipRow({
             }}
             aria-label="よくないね"
           >
-            <ThumbsDown size={15} fill={myVote === "dislike" ? "#4DD8FF" : "none"} />
+            <ThumbsDown
+              key={dislikeBump}
+              className={dislikeBump > 0 ? "cv-pop" : undefined}
+              size={15}
+              fill={myVote === "dislike" ? "#4DD8FF" : "none"}
+            />
             {dislikes}
           </button>
           <button
@@ -226,6 +246,28 @@ function ClipRow({
           >
             <MessageCircle size={15} />
             {comments.length}
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setFavBump((n) => n + 1);
+              onToggleFavorite(clip.id);
+            }}
+            style={{
+              ...styles.actionBtn,
+              ...styles.favBtn,
+              color: isFavorited ? "#FFC857" : "#8A8A99",
+              borderColor: isFavorited ? "#FFC85755" : "#2E2E3A",
+            }}
+            aria-label={isFavorited ? "お気に入りから外す" : "お気に入りに追加"}
+            title={isFavorited ? "お気に入りから外す" : "お気に入りに追加"}
+          >
+            <Star
+              key={favBump}
+              className={favBump > 0 ? "cv-pop" : undefined}
+              size={15}
+              fill={isFavorited ? "#FFC857" : "none"}
+            />
           </button>
         </div>
       </div>
@@ -381,6 +423,7 @@ export default function ClipRanking() {
   );
   const clipIds = useMemo(() => clips.map((c) => c.id), [clips]);
   const { counts, myVotes, vote } = useReactions(clipIds);
+  const { favoritedIds, toggle: toggleFavorite } = useFavorites(clipIds);
   const streamerNames = useMemo(() => [...new Set(clips.map((c) => c.streamer))], [clips]);
   const avatars = useBroadcasterAvatars(streamerNames);
 
@@ -480,6 +523,10 @@ export default function ClipRanking() {
             <Link to="/my-reactions" style={styles.broadcastersLink}>
               <ListChecks size={13} />
               評価した動画
+            </Link>
+            <Link to="/favorites" style={styles.broadcastersLink}>
+              <Star size={13} />
+              お気に入り
             </Link>
           </div>
           <div className="cv-search-box" style={styles.searchBox}>
@@ -596,6 +643,8 @@ export default function ClipRanking() {
                 dislikes={stats.dislikes}
                 myVote={myVotes[clip.id]}
                 onVote={vote}
+                isFavorited={favoritedIds.has(clip.id)}
+                onToggleFavorite={toggleFavorite}
                 commentsActive={activeCommentClipId === clip.id}
                 onOpenComments={toggleComments}
                 onCommentsUpdate={handleCommentsUpdate}
@@ -868,6 +917,7 @@ const styles = {
     padding: "6px 9px",
     fontSize: 12.5,
   },
+  favBtn: { padding: "6px 8px" },
   playerPanel: {
     marginTop: 12,
     paddingTop: 12,

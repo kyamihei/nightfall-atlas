@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Loader2, Star } from "lucide-react";
-import { useMyReactions, useBroadcasterAvatars } from "../lib/use-clip-ranking";
+import { ArrowLeft, Loader2, Star, Film, ListChecks } from "lucide-react";
+import { useMyFavorites, useBroadcasterAvatars } from "../lib/use-clip-ranking";
 
 function formatViews(n) {
   return new Intl.NumberFormat("ja-JP").format(n);
@@ -17,12 +17,12 @@ function timeAgo(ts) {
   return `${Math.floor(hr / 24)}日前`;
 }
 
-export default function MyReactions() {
-  const { likedClips, dislikedClips, loading } = useMyReactions();
-  const [tab, setTab] = useState("like"); // like | dislike
-
-  const clips = tab === "like" ? likedClips : dislikedClips;
-  const streamerNames = useMemo(() => [...new Set(clips.map((c) => c.streamer))], [clips]);
+export default function MyFavorites() {
+  const { favoritedClips, loading } = useMyFavorites();
+  const streamerNames = useMemo(
+    () => [...new Set(favoritedClips.map((c) => c.streamer))],
+    [favoritedClips],
+  );
   const avatars = useBroadcasterAvatars(streamerNames);
 
   return (
@@ -49,28 +49,16 @@ export default function MyReactions() {
 
       <header style={styles.header}>
         <div style={styles.headerTop}>
-          <h1 className="clip-title-font" style={{ ...styles.h1, margin: 0 }}>
-            評価した動画
+          <h1 className="clip-title-font" style={styles.h1}>
+            <Star size={20} color="#FFC857" fill="#FFC857" style={{ marginRight: 8, verticalAlign: -2 }} />
+            お気に入り（{favoritedClips.length}）
           </h1>
-          <Link to="/favorites" style={styles.favoritesLink}>
-            <Star size={13} />
-            お気に入りを見る
+          <Link to="/my-reactions" style={styles.favoritesLink}>
+            <ListChecks size={13} />
+            評価した動画を見る
           </Link>
         </div>
-        <div style={{ ...styles.tabs, marginTop: 14 }}>
-          <button
-            onClick={() => setTab("like")}
-            style={tab === "like" ? styles.tabActive : styles.tab}
-          >
-            いいね（{likedClips.length}）
-          </button>
-          <button
-            onClick={() => setTab("dislike")}
-            style={tab === "dislike" ? styles.tabActive : styles.tab}
-          >
-            よくないね（{dislikedClips.length}）
-          </button>
-        </div>
+        <p style={styles.tagline}>登録した順に新しいものから表示しています</p>
       </header>
 
       {loading ? (
@@ -80,12 +68,18 @@ export default function MyReactions() {
         </div>
       ) : (
         <div style={styles.list}>
-          {clips.length === 0 && (
+          {favoritedClips.length === 0 && (
             <div style={styles.emptyState}>
-              {tab === "like" ? "いいねした動画はまだありません。" : "よくないねした動画はまだありません。"}
+              <Film size={26} color="#3E3E4A" style={{ marginBottom: 10 }} />
+              <p style={{ margin: 0 }}>お気に入りしたクリップはまだありません。</p>
+              <p style={{ margin: "4px 0 0", fontSize: 12.5, color: "#4E4E58" }}>
+                クリップ一覧の
+                <Star size={11} style={{ verticalAlign: -1, margin: "0 3px" }} />
+                アイコンから登録できます。
+              </p>
             </div>
           )}
-          {clips.map((clip, i) => (
+          {favoritedClips.map((clip, i) => (
             <Link
               key={clip.id}
               className="cv-list-row cv-fade-in-up"
@@ -110,7 +104,7 @@ export default function MyReactions() {
                   {clip.streamer} ・ {clip.game} ・ ▶ {formatViews(clip.view_count)}回視聴
                 </p>
               </div>
-              <span style={styles.reactedAt}>{timeAgo(new Date(clip.reactedAt).getTime())}</span>
+              <span style={styles.reactedAt}>{timeAgo(new Date(clip.favoritedAt).getTime())}</span>
             </Link>
           ))}
         </div>
@@ -160,27 +154,18 @@ const styles = {
     fontSize: 12.5,
     textDecoration: "none",
   },
-  h1: { fontSize: 24, fontWeight: 600, margin: "0 0 14px" },
-  tabs: { display: "flex", gap: 6 },
-  tab: {
-    background: "transparent",
-    border: "1px solid #2E2E3A",
-    color: "#8A8A99",
-    borderRadius: 20,
-    padding: "6px 14px",
-    fontSize: 13,
-  },
-  tabActive: {
-    background: "#24242F",
-    border: "1px solid #3A3A48",
-    color: "#EDEDF2",
-    borderRadius: 20,
-    padding: "6px 14px",
-    fontSize: 13,
-    fontWeight: 500,
-  },
+  h1: { fontSize: 24, fontWeight: 600, margin: "0 0 6px", display: "flex", alignItems: "center" },
+  tagline: { fontSize: 13, color: "#6B6B78", margin: 0 },
   list: { display: "flex", flexDirection: "column", gap: 8 },
-  emptyState: { color: "#6B6B78", fontSize: 14, padding: "40px 0", textAlign: "center" },
+  emptyState: {
+    color: "#6B6B78",
+    fontSize: 14,
+    padding: "48px 0",
+    textAlign: "center",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+  },
   row: {
     display: "flex",
     alignItems: "center",

@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Heart, ThumbsDown, Send, Flag, Loader2 } from "lucide-react";
+import { ArrowLeft, Heart, ThumbsDown, Star, Send, Flag, Loader2 } from "lucide-react";
 import {
   useClip,
   useReactions,
+  useFavorites,
   useComments,
   useCommentReport,
   useBroadcasterAvatars,
@@ -39,6 +40,7 @@ export default function ClipDetail() {
   const { clip, loading, error } = useClip(id);
   const clipIds = clip ? [clip.id] : [];
   const { counts, myVotes, vote } = useReactions(clipIds);
+  const { favoritedIds, toggle: toggleFavorite } = useFavorites(clipIds);
   const avatars = useBroadcasterAvatars(clip ? [clip.streamer] : []);
   const { comments, submit, submitting, error: commentError } = useComments(id);
   const { report: reportComment } = useCommentReport();
@@ -68,9 +70,8 @@ export default function ClipDetail() {
   if (loading) {
     return (
       <div style={styles.loadingWrap}>
-        <Loader2 size={22} style={{ animation: "spin 1s linear infinite" }} />
+        <Loader2 size={22} style={{ animation: "cv-spin 1s linear infinite" }} />
         <span style={{ marginLeft: 10 }}>読み込み中…</span>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
@@ -93,8 +94,7 @@ export default function ClipDetail() {
   return (
     <div style={styles.page}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
-        * { box-sizing: border-box; font-family: 'Inter', sans-serif; }
+        * { font-family: 'Inter', sans-serif; }
         .clip-title-font { font-family: 'Oswald', sans-serif; }
         button, a { cursor: pointer; }
         textarea:focus, input:focus { outline: 2px solid #FF4D6D33; }
@@ -154,6 +154,18 @@ export default function ClipDetail() {
         >
           <ThumbsDown size={16} fill={myVote === "dislike" ? "#4DD8FF" : "none"} />
           {stats.dislikes}
+        </button>
+        <button
+          onClick={() => toggleFavorite(clip.id)}
+          style={{
+            ...styles.actionBtn,
+            color: favoritedIds.has(clip.id) ? "#FFC857" : "#8A8A99",
+            borderColor: favoritedIds.has(clip.id) ? "#FFC85755" : "#2E2E3A",
+          }}
+          aria-label={favoritedIds.has(clip.id) ? "お気に入りから外す" : "お気に入りに追加"}
+        >
+          <Star size={16} fill={favoritedIds.has(clip.id) ? "#FFC857" : "none"} />
+          {favoritedIds.has(clip.id) ? "お気に入り済み" : "お気に入り"}
         </button>
       </div>
 

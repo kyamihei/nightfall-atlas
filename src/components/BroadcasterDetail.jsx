@@ -49,9 +49,8 @@ export default function BroadcasterDetail() {
   if (loading) {
     return (
       <div style={styles.loadingWrap}>
-        <Loader2 size={22} style={{ animation: "spin 1s linear infinite" }} />
+        <Loader2 size={22} style={{ animation: "cv-spin 1s linear infinite" }} />
         <span style={{ marginLeft: 10 }}>読み込み中…</span>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
@@ -59,10 +58,18 @@ export default function BroadcasterDetail() {
   return (
     <div style={styles.page}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
-        * { box-sizing: border-box; font-family: 'Inter', sans-serif; }
+        * { font-family: 'Inter', sans-serif; }
         .clip-title-font { font-family: 'Oswald', sans-serif; }
         a { cursor: pointer; text-decoration: none; }
+        .cv-list-row {
+          transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+        }
+        .cv-list-row:hover {
+          background: #22222E;
+          border-color: #33333F;
+          transform: translateY(-1px);
+          box-shadow: 0 4px 16px rgba(0,0,0,0.28);
+        }
       `}</style>
 
       <Link to="/broadcasters" style={styles.backLink}>
@@ -124,7 +131,12 @@ export default function BroadcasterDetail() {
           <div style={styles.emptyState}>この配信者のクリップはまだありません。</div>
         )}
         {clips.map((clip, i) => (
-          <Link key={clip.id} to={`/clips/${clip.id}`} style={styles.row}>
+          <Link
+            key={clip.id}
+            className="cv-list-row cv-fade-in-up"
+            to={`/clips/${clip.id}`}
+            style={{ ...styles.row, animationDelay: `${Math.min(i, 12) * 40}ms` }}
+          >
             <div style={styles.rankNum}>{String(i + 1).padStart(2, "0")}</div>
             <div style={styles.thumb}>
               {clip.thumbnail_url ? (

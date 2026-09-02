@@ -207,6 +207,47 @@ export function useReactions(clipIds: string[]) {
   return { counts, myVotes, vote };
 }
 
+/**
+ * クリップ一覧に対する「自分のお気に入り」状態を取得・トグルする。
+ * favoritesテーブルはRLSで自分の行のみ閲覧・書き込み可能なため、reactionsと違い
+ * 他人の集計値を返すRPCは不要（お気に入り数は仕様上、誰にも公開しない）。
+ */
+export function useFavorites(clipIds: string[]) {
+  const [favoritedIds, setFavoritedIds] = useState<Set<string>>(new Set());
+
+  const refresh = useCallback(async () => {
+    if (clipIds.length === 0) return;
+    const user = await ensureAnonymousSession();
+    const { data } = await supabase
+      .from("favorites")
+      .select("clip_id")
+      .eq("anon_id", user.id)
+      .in("clip_id", clipIds);
+    setFavoritedIds(new Set((data ?? []).map((row) => row.clip_id as string)));
+  }, [clipIds]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const toggle = useCallback(
+    async (clipId: string) => {
+      const user = await ensureAnonymousSession();
+      if (favoritedIds.has(clipId)) {
+        await supabase.from("favorites").delete().eq("clip_id", clipId).eq("anon_id", user.id);
+      } else {
+        await supabase
+          .from("favorites")
+          .upsert({ clip_id: clipId, anon_id: user.id }, { onConflict: "clip_id,anon_id" });
+      }
+      await refresh();
+    },
+    [favoritedIds, refresh],
+  );
+
+  return { favoritedIds, toggle };
+}
+
 export interface ReactedClip extends Clip {
   reactedAt: string;
 }
@@ -251,6 +292,48 @@ export function useMyReactions() {
   }, [refresh]);
 
   return { likedClips, dislikedClips, loading, refresh };
+}
+
+export interface FavoritedClip extends Clip {
+  favoritedAt: string;
+}
+
+/**
+ * 自分がお気に入り登録したクリップの一覧を取得する。
+ * favoritesテーブルをclipsとJOIN（Supabaseの外部キーに基づく自動リレーション）して、
+ * クリップ情報ごと一度に取得する。
+ */
+export function useMyFavorites() {
+  const [favoritedClips, setFavoritedClips] = useState<FavoritedClip[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    const user = await ensureAnonymousSession();
+    const { data, error } = await supabase
+      .from("favorites")
+      .select(
+        "created_at, clips(id, title, streamer, game, view_count, thumbnail_url, twitch_created_at)",
+      )
+      .eq("anon_id", user.id)
+      .order("created_at", { ascending: false });
+
+    if (!error && data) {
+      const favorited: FavoritedClip[] = [];
+      for (const row of data as unknown as { created_at: string; clips: Clip | null }[]) {
+        if (!row.clips) continue; // クリップが削除されている場合はスキップ
+        favorited.push({ ...row.clips, favoritedAt: row.created_at });
+      }
+      setFavoritedClips(favorited);
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  return { favoritedClips, loading, refresh };
 }
 
 /**

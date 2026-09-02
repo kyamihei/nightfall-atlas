@@ -17,8 +17,9 @@ Twitchクリップのランキング掲示板。いいね/よくないねの反�
   - `ClipDetail.jsx` - クリップ個別ページ、コメント欄はページ内常時表示（`/clips/:id`）
   - `BroadcasterList.jsx` / `BroadcasterDetail.jsx` - 配信者一覧・詳細（`/broadcasters`, `/broadcasters/:name`）
   - `MyReactions.jsx` - 自分が評価したクリップ一覧（`/my-reactions`）
+  - `MyFavorites.jsx` - 自分がお気に入り登録したクリップ一覧（`/favorites`）
 - `src/lib/supabase-client.ts` - Supabaseクライアント初期化＋匿名認証（`ensureAnonymousSession`）
-- `src/lib/use-clip-ranking.ts` - データ層フック集（`useClips` / `useReactions` / `useFavorites` / `useComments` / `useBroadcasterSearch` / `useBroadcasterRequest` / `useCommentReport` / `useBroadcasterAvatars` など）
+- `src/lib/use-clip-ranking.ts` - データ層フック集（`useClips` / `useReactions` / `useFavorites` / `useMyFavorites` / `useComments` / `useBroadcasterSearch` / `useBroadcasterRequest` / `useCommentReport` / `useBroadcasterAvatars` など）。`favorites`テーブル・RLSはSupabaseスキーマに元々あったがUIが未実装だったため2026-09-02に`useFavorites`/`useMyFavorites`とUIを追加して完成させた
 - `supabase/schema.sql`, `supabase/migrations/` - テーブル・RLS・トリガー・RPC定義
 - `supabase/functions/post-comment/` - コメント投稿Edge Function（NGワード検査・レート制限）
 - `supabase/functions/request-broadcaster/` - 配信者登録リクエストEdge Function（Twitch実在確認つき）

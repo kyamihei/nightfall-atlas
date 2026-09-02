@@ -21,11 +21,19 @@ export default function BroadcasterList() {
   return (
     <div style={styles.page}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
-        * { box-sizing: border-box; font-family: 'Inter', sans-serif; }
+        * { font-family: 'Inter', sans-serif; }
         .clip-title-font { font-family: 'Oswald', sans-serif; }
         button, a { cursor: pointer; }
         input:focus { outline: 2px solid #FF4D6D33; }
+        .cv-list-row {
+          transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+        }
+        .cv-list-row:hover {
+          background: #22222E;
+          border-color: #33333F;
+          transform: translateY(-1px);
+          box-shadow: 0 4px 16px rgba(0,0,0,0.28);
+        }
       `}</style>
 
       <header style={styles.header}>
@@ -57,7 +65,12 @@ export default function BroadcasterList() {
           <div style={styles.list}>
             {visible.length === 0 && <div style={styles.emptyState}>該当する配信者が見つかりませんでした。</div>}
             {visible.map((b, i) => (
-              <Link key={b.streamer} to={`/broadcasters/${encodeURIComponent(b.streamer)}`} style={styles.row}>
+              <Link
+                key={b.streamer}
+                className="cv-list-row cv-fade-in-up"
+                to={`/broadcasters/${encodeURIComponent(b.streamer)}`}
+                style={{ ...styles.row, animationDelay: `${Math.min(i, 12) * 40}ms` }}
+              >
                 <div style={styles.rankNum}>{String((page - 1) * PAGE_SIZE + i + 1).padStart(2, "0")}</div>
                 {b.profile_image_url ? (
                   <img src={b.profile_image_url} alt="" style={styles.avatar} />
