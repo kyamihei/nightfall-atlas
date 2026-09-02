@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { useBroadcasterProfile } from "../lib/use-clip-ranking";
+import Footer from "./Footer";
 
 const PERIOD_TABS = [
   { value: "all", label: "全期間" },
@@ -154,6 +155,8 @@ export default function BroadcasterDetail() {
           </Link>
         ))}
       </div>
+
+      <Footer />
     </div>
   );
 }

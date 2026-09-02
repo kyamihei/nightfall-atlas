@@ -215,10 +215,7 @@ drop policy if exists "tracked_clippers_public_read" on tracked_clippers;
 create policy "tracked_clippers_public_read" on tracked_clippers
   for select using (true);
 
--- broadcaster_requests: 自分のリクエストのみ閲覧可（ステータス確認用）。挿入も自分のanon_idの行のみ許可
-drop policy if exists "broadcaster_requests_insert_own" on broadcaster_requests;
-create policy "broadcaster_requests_insert_own" on broadcaster_requests
-  for insert with check (anon_id = auth.uid());
+-- broadcaster_requests: 自分のリクエストのみ閲覧可（ステータス確認用）。挿入はEdge Function経由(service role)のみ
 
 -- contact_messages: 挿入は自分のanon_idの行のみ許可（submit-contact Edge Function経由）。
 -- 閲覧の公開ポリシーは設けない＝運営のみが直接SQLで確認する想定。

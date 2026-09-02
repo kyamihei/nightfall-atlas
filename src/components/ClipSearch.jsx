@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Search, Loader2, Film } from "lucide-react";
 import { useClipSearch, extractClipIdFromUrl, SEARCH_MIN_LENGTH } from "../lib/use-clip-ranking";
 import { supabase } from "../lib/supabase-client";
+import Footer from "./Footer";
 
 function formatViews(n) {
   return new Intl.NumberFormat("ja-JP").format(n);
@@ -131,6 +132,8 @@ export default function ClipSearch() {
           )}
         </div>
       )}
+
+      <Footer />
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Send, Flag, CornerUpLeft, X, MessageSquare } from "lucide-react";
 import { useComments, useCommentReport, useClip } from "../lib/use-clip-ranking";
 import { supabase } from "../lib/supabase-client";
+import Footer from "./Footer";
 
 const GENERAL_THREAD_ID = "__general_thread__";
 // 総合スレのコメント本文の先頭に付ける、元クリップを示す目印。表示時はこれを取り除いて
@@ -221,6 +222,8 @@ export default function GeneralThread() {
         </div>
         {(localError || commentError) && <p style={styles.commentErrorText}>{localError || commentError}</p>}
       </div>
+
+      <Footer />
     </div>
   );
 }

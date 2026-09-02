@@ -9,6 +9,10 @@ import ClipperList from "./components/ClipperList";
 import ClipperDetail from "./components/ClipperDetail";
 import ClipSearch from "./components/ClipSearch";
 import GeneralThread from "./components/GeneralThread";
+import AboutPage from "./components/AboutPage";
+import TermsPage from "./components/TermsPage";
+import PrivacyPage from "./components/PrivacyPage";
+import ContactPage from "./components/ContactPage";
 
 export default function App() {
   return (
@@ -24,6 +28,10 @@ export default function App() {
         <Route path="/clippers/:creatorId" element={<ClipperDetail />} />
         <Route path="/search" element={<ClipSearch />} />
         <Route path="/general" element={<GeneralThread />} />
+        <Route path="/about" element={<AboutPage />} />
+        <Route path="/terms" element={<TermsPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/contact" element={<ContactPage />} />
       </Routes>
     </BrowserRouter>
   );

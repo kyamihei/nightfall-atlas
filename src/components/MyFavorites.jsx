@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ArrowLeft, Loader2, Star, Film, ListChecks } from "lucide-react";
 import { useMyFavorites, useBroadcasterAvatars } from "../lib/use-clip-ranking";
 import { REACTIONS_ENABLED } from "../lib/feature-flags";
+import Footer from "./Footer";
 
 function formatViews(n) {
   return new Intl.NumberFormat("ja-JP").format(n);
@@ -112,6 +113,8 @@ export default function MyFavorites() {
           ))}
         </div>
       )}
+
+      <Footer />
     </div>
   );
 }

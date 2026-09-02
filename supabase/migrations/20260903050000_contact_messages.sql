@@ -175,9 +175,9 @@ create table if not exists broadcaster_requests (
 create index if not exists idx_broadcaster_requests_anon_time
   on broadcaster_requests(anon_id, created_at desc);
 
--- お問い合わせフォームからの投稿。一般公開の閲覧ポリシーは設けず、運営が
+-- お問い合わせフォームからの投稿。一般公開はせず、運営（service role）のみが
 -- `npx supabase db query --linked "select * from contact_messages order by created_at desc"`
--- （postgresロールでRLSをバイパスして直接クエリ）で確認する運用（管理画面UIは未実装）。
+-- 等で直接確認する運用（管理画面UIは未実装）。挿入はsubmit-contact Edge Function経由のみ。
 create table if not exists contact_messages (
   id uuid primary key default gen_random_uuid(),
   anon_id uuid not null,
@@ -215,28 +215,10 @@ drop policy if exists "tracked_clippers_public_read" on tracked_clippers;
 create policy "tracked_clippers_public_read" on tracked_clippers
   for select using (true);
 
--- broadcaster_requests: 自分のリクエストのみ閲覧可（ステータス確認用）。挿入も自分のanon_idの行のみ許可
-drop policy if exists "broadcaster_requests_insert_own" on broadcaster_requests;
-create policy "broadcaster_requests_insert_own" on broadcaster_requests
-  for insert with check (anon_id = auth.uid());
+-- broadcaster_requests: 自分のリクエストのみ閲覧可（ステータス確認用）。挿入はEdge Function経由(service role)のみ
 
--- contact_messages: 挿入は自分のanon_idの行のみ許可（submit-contact Edge Function経由）。
--- 閲覧の公開ポリシーは設けない＝運営のみが直接SQLで確認する想定。
---
--- 【重要な注意】Edge Function側で `createClient(url, SERVICE_ROLE_KEY, { global: { headers: {
--- Authorization: authHeader } } })` のようにservice roleキーでクライアントを作りつつ
--- ユーザー自身のJWTをAuthorizationヘッダーに上書き設定するパターン（post-comment等で採用）は、
--- 「service roleとしてRLSをバイパスする」わけではない。PostgRESTはAuthorizationヘッダーの
--- JWTからロール・auth.uid()を決定するため、実際には authenticated ロールとしてRLSが適用される
--- （apikeyヘッダーのservice roleキーはプロジェクト識別に使われるのみ）。そのため、この構成の
--- Edge Function経由で書き込むテーブルには、対象ロール向けのinsert/updateポリシーが必須。
--- 本番で実際にハマった: contact_messagesにポリシーを用意し忘れ、Edge Functionの挿入が
--- 500エラーで失敗した（2026-09-03）。broadcaster_requestsもinsertポリシーが無いままだが、
--- request-broadcaster側が挿入結果のエラーを無視しているため気付かれていない可能性がある
--- （未検証・別途要調査）。
-drop policy if exists "contact_messages_insert_own" on contact_messages;
-create policy "contact_messages_insert_own" on contact_messages
-  for insert with check (anon_id = auth.uid());
+-- contact_messages: 閲覧・挿入ともに公開ポリシーなし（＝匿名ロールからは完全に拒否）。
+-- 挿入はsubmit-contact Edge Function（service role）経由のみ、閲覧も運営がservice roleで直接確認する想定。
 
 -- clips: 誰でも閲覧可、書き込みはサーバー(service role)のみ
 drop policy if exists "clips_public_read" on clips;

@@ -89,9 +89,12 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: "Twitchのチャンネル名を正しく入力してください" }, 400);
   }
 
-  const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
-    global: { headers: { Authorization: authHeader } },
-  });
+  // service roleキーで初期化した素のクライアント（AuthorizationヘッダーをユーザーのJWTで
+  // 上書きしない）。上書きすると以降の全クエリがRLS上「authenticated」ロールとして扱われ、
+  // service roleとしてRLSをバイパスできなくなる（本番で実際にtracked_broadcastersへの
+  // upsertとbroadcaster_requestsへのinsertがサイレント失敗していたバグの原因。2026-09-03発見・修正）。
+  // auth.getUser(jwt)はトークンを明示的に渡す形なので、この上書きなしでも正しく検証できる。
+  const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
   const {
     data: { user },
@@ -143,7 +146,7 @@ Deno.serve(async (req) => {
   }
 
   // 実在確認できたので自動反映
-  await supabase.from("tracked_broadcasters").upsert(
+  const { error: upsertError } = await supabase.from("tracked_broadcasters").upsert(
     {
       broadcaster_id: twitchUser.id,
       broadcaster_name: twitchUser.display_name,
@@ -151,6 +154,9 @@ Deno.serve(async (req) => {
     },
     { onConflict: "broadcaster_id" },
   );
+  if (upsertError) {
+    return jsonResponse({ error: "登録処理に失敗しました。しばらくしてからお試しください" }, 500);
+  }
   await supabase.from("broadcaster_requests").insert({
     twitch_login: login,
     anon_id: anonId,

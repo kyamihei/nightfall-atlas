@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { useTopBroadcasters } from "../lib/use-clip-ranking";
+import Footer from "./Footer";
 
 const PAGE_SIZE = 30;
 
@@ -113,6 +114,8 @@ export default function BroadcasterList() {
           )}
         </>
       )}
+
+      <Footer />
     </div>
   );
 }

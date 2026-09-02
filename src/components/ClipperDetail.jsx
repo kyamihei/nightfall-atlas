@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, Loader2, ExternalLink } from "lucide-react";
 import { useClipperProfile } from "../lib/use-clip-ranking";
+import Footer from "./Footer";
 
 const PERIOD_TABS = [
   { value: "all", label: "全期間" },
@@ -165,6 +166,8 @@ export default function ClipperDetail() {
           </Link>
         ))}
       </div>
+
+      <Footer />
     </div>
   );
 }

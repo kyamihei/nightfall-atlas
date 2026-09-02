@@ -607,6 +607,43 @@ export function useBroadcasterRequest() {
   return { request, submitting, result };
 }
 
+export type ContactCategory = "bug" | "request" | "report" | "other";
+
+/** お問い合わせフォーム送信。contact_messagesは公開閲覧ポリシーがないため、送信専用（submit-contact Edge Function経由） */
+export function useContactForm() {
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const submit = useCallback(async (category: ContactCategory, email: string, body: string) => {
+    setSubmitting(true);
+    setResult(null);
+    try {
+      await ensureAnonymousSession();
+      const token = await getAccessToken();
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/submit-contact`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ category, email, body }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setResult({ ok: false, message: data.error ?? "送信に失敗しました" });
+      } else {
+        setResult({ ok: true, message: "お問い合わせを受け付けました。ありがとうございます" });
+      }
+    } catch {
+      setResult({ ok: false, message: "通信に失敗しました。ネットワークを確認してください" });
+    } finally {
+      setSubmitting(false);
+    }
+  }, []);
+
+  return { submit, submitting, result };
+}
+
 /** コメント通報。RLSの comment_reports_insert_own ポリシーに従い、自分のanon_idで1件だけ挿入する */
 export function useCommentReport() {
   const [reporting, setReporting] = useState(false);

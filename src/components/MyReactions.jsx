@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ArrowLeft, Loader2, Star } from "lucide-react";
 import { useMyReactions, useBroadcasterAvatars } from "../lib/use-clip-ranking";
 import { REACTIONS_ENABLED } from "../lib/feature-flags";
+import Footer from "./Footer";
 
 function formatViews(n) {
   return new Intl.NumberFormat("ja-JP").format(n);
@@ -37,6 +38,7 @@ export default function MyReactions() {
           ランキングに戻る
         </Link>
         <div style={styles.emptyState}>この機能は現在ご利用いただけません。</div>
+        <Footer />
       </div>
     );
   }
@@ -131,6 +133,8 @@ export default function MyReactions() {
           ))}
         </div>
       )}
+
+      <Footer />
     </div>
   );
 }

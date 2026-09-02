@@ -18,6 +18,7 @@ import {
   useTrendingClips,
 } from "../lib/use-clip-ranking";
 import { REACTIONS_ENABLED } from "../lib/feature-flags";
+import Footer from "./Footer";
 
 const PERIOD_TABS = [
   { value: "all", label: "全期間" },
@@ -960,9 +961,7 @@ export default function ClipRanking() {
         </div>
       )}
 
-      <footer style={styles.footer}>
-        お気に入り・コメントはすべてのブラウザで共有されます。
-      </footer>
+      <Footer note="お気に入り・コメントはすべてのブラウザで共有されます。" />
 
       {activeCommentClipId && (() => {
         const activeClip = clips.find((c) => c.id === activeCommentClipId);
@@ -1477,11 +1476,5 @@ const styles = {
     padding: "9px 11px",
     display: "flex",
     alignItems: "center",
-  },
-  footer: {
-    marginTop: 28,
-    fontSize: 11.5,
-    color: "#4E4E58",
-    textAlign: "center",
   },
 };

@@ -200,6 +200,51 @@ Twitchクリップのランキング掲示板。いいね/よくないねの反�
   （`supabase/migrations/20260903*.sql`、`search_clips`だけ紆余曲折で複数ファイルに分かれているが
   最終的に`20260903040000_search_clips_revert_to_simple.sql`が現在の本番の姿）。
 
+## フッター・お問い合わせフォーム（2026-09-03追加）
+
+- 全ページ共通の`Footer`コンポーネント（`src/components/Footer.jsx`）を追加し、
+  既存の全ページコンポーネント（10個）＋新規静的ページの計14ページ全てに配置した。
+  ホーム/サイトについて/利用規約/プライバシーポリシー/お問い合わせへのリンクとCopyright表記を表示する。
+  `ClipRanking.jsx`が元々持っていた「お気に入り・コメントは...」の注記は`note`propとして残している。
+- サイトについて（`/about`）・利用規約（`/terms`）・プライバシーポリシー（`/privacy`）は
+  静的コンテンツのページ（`AboutPage.jsx`/`TermsPage.jsx`/`PrivacyPage.jsx`）。
+- **お問い合わせフォーム**（`/contact`、`ContactPage.jsx`）: 種類（不具合/要望/通報/その他）・
+  メールアドレス（任意）・本文を送信すると`contact_messages`テーブルに保存される
+  （`submit-contact` Edge Function経由、`useContactForm`フック）。**管理画面UIは実装しておらず**、
+  運営が`npx supabase db query --linked "select * from contact_messages order by created_at desc"`
+  で直接確認する運用。公開の閲覧・一覧表示ポリシーは設けていない。
+- **本番でハマった重要なRLSの罠（今後同種のEdge Functionを追加する際に必読）**:
+  `post-comment`等が使っている「`createClient(url, SERVICE_ROLE_KEY, { global: { headers: {
+  Authorization: authHeader } } })`でservice roleキーのクライアントを作りつつ、Authorizationヘッダーだけ
+  ユーザー自身のJWTに差し替える」パターンは、**service roleとしてRLSをバイパスするわけではない**。
+  PostgRESTはAuthorizationヘッダーのJWTからロールと`auth.uid()`を決定するため、実際には
+  `authenticated`ロールとしてRLSがそのまま適用される（`apikey`ヘッダーのservice roleキーは
+  プロジェクト識別に使われるのみで、ロール決定には使われない）。そのため、このパターンを使う
+  Edge Function経由で書き込むテーブルには、対象ロール向けのinsert/updateポリシーが必須。
+  `contact_messages`にこのポリシーを用意し忘れ、`submit-contact`の挿入が500エラーで
+  失敗するというバグを本番で実際に踏んだ（2026-09-03、`contact_messages_insert_own`ポリシー
+  ＝`anon_id = auth.uid()`を追加して解決）。
+  - 疑って調査した結果、**`request-broadcaster`（配信者登録リクエスト機能）が全く同じ原因で、
+    導入当初から実質的に機能していなかったことが判明**。`broadcaster_requests`への履歴insertだけ
+    でなく、本来の目的である`tracked_broadcasters`へのupsert（＝配信者を実際に登録する処理）も
+    同じくRLSでサイレント失敗しており、ユーザーが「配信者を追加してほしい」とリクエストしても
+    実際には何も登録されないままメッセージだけ成功表示されるという状態だった
+    （本番の`broadcaster_requests`が常に0件だったこと、存在しないTwitchチャンネル名で
+    意図的にrejectedパスを踏ませても行が増えないこと、実在するが未登録の配信者
+    （テストで`shroud`を使用）でapprovedパスを踏ませても`tracked_broadcasters`に行が
+    増えないことをcurlで確認して特定・修正後に再検証。テストで作成した行は削除済み）。
+    - **根本修正**: `broadcaster_requests`へのRLSポリシー追加という対症療法ではなく、
+      `request-broadcaster`側の`createClient`呼び出しから`global.headers.Authorization`の
+      上書きそのものを削除し、正真正銘のservice roleクライアントとして動作するよう修正
+      （`auth.getUser(jwt)`はトークンを明示的に渡す呼び出しのため、この上書きが無くても
+      正しく検証できる）。`tracked_broadcasters`は元々「書き込みはservice roleのみ
+      （ポリシーなし＝拒否）」という設計なので、ここに書き込み用RLSポリシーを追加する対応は
+      セキュリティ上避けた（誰でもTwitch実在確認なしに直接書き込めるようになってしまうため）。
+      あわせて`tracked_broadcasters`へのupsert結果のエラーチェックも追加し、
+      今後同種の問題が起きても再びサイレント失敗しないようにした。2026-09-03修正・本番デプロイ済み。
+    - `broadcaster_requests_insert_own`ポリシー（`anon_id = auth.uid()`）は履歴記録用として
+      そのまま追加済み（こちらは対症療法ではなく妥当な設計）。
+
 ## 認証
 
 - ログイン機能はなく、Supabase Anonymous Auth（匿名サインイン）でブラウザごとにanon_idを発行・永続化し、いいね/よくないね/お気に入り/コメントを紐付けている

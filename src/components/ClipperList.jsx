@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Scissors, ChevronLeft, ChevronRight } from "lucide-react";
 import { useTopClippers } from "../lib/use-clip-ranking";
+import Footer from "./Footer";
 
 const PAGE_SIZE = 30;
 const RANK_ACCENTS = { 1: "#FFC857", 2: "#C9CEDA", 3: "#D98E5D" };
@@ -140,6 +141,8 @@ export default function ClipperList() {
           </div>
         </>
       )}
+
+      <Footer />
     </div>
   );
 }
