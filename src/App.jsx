@@ -5,6 +5,7 @@ import ClipDetail from "./components/ClipDetail";
 import BroadcasterDetail from "./components/BroadcasterDetail";
 import MyReactions from "./components/MyReactions";
 import MyFavorites from "./components/MyFavorites";
+import MyStampsPage from "./components/MyStampsPage";
 import ClipperList from "./components/ClipperList";
 import ClipperDetail from "./components/ClipperDetail";
 import ClipSearch from "./components/ClipSearch";
@@ -24,6 +25,7 @@ export default function App() {
         <Route path="/broadcasters/:name" element={<BroadcasterDetail />} />
         <Route path="/my-reactions" element={<MyReactions />} />
         <Route path="/favorites" element={<MyFavorites />} />
+        <Route path="/my-stamps" element={<MyStampsPage />} />
         <Route path="/clippers" element={<ClipperList />} />
         <Route path="/clippers/:creatorId" element={<ClipperDetail />} />
         <Route path="/search" element={<ClipSearch />} />

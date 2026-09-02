@@ -418,6 +418,54 @@ export function useMyReactions() {
   return { likedClips, dislikedClips, loading, refresh };
 }
 
+export interface StampedClip extends Clip {
+  stampedAt: string;
+}
+
+/**
+ * 自分がリアクションスタンプを押したクリップ一覧を、スタンプ種別ごとにグループ化して取得する。
+ * clip_reaction_stampsをclipsとJOIN（Supabaseの外部キーに基づく自動リレーション）して、
+ * クリップ情報ごと一度に取得する。1つのクリップに複数種類のスタンプを押していれば、
+ * それぞれのスタンプのグループに重複して現れる。
+ */
+export function useMyStamps() {
+  const [clipsByStamp, setClipsByStamp] = useState<Record<ReactionStamp, StampedClip[]>>(
+    () => Object.fromEntries(REACTION_STAMPS.map((s) => [s, []])) as Record<ReactionStamp, StampedClip[]>,
+  );
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    const user = await ensureAnonymousSession();
+    const { data, error } = await supabase
+      .from("clip_reaction_stamps")
+      .select(
+        "stamp, created_at, clips(id, title, streamer, game, view_count, thumbnail_url, twitch_created_at)",
+      )
+      .eq("anon_id", user.id)
+      .order("created_at", { ascending: false });
+
+    if (!error && data) {
+      const grouped = Object.fromEntries(REACTION_STAMPS.map((s) => [s, [] as StampedClip[]])) as Record<
+        ReactionStamp,
+        StampedClip[]
+      >;
+      for (const row of data as unknown as { stamp: ReactionStamp; created_at: string; clips: Clip | null }[]) {
+        if (!row.clips) continue; // クリップが削除されている場合はスキップ
+        grouped[row.stamp]?.push({ ...row.clips, stampedAt: row.created_at });
+      }
+      setClipsByStamp(grouped);
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  return { clipsByStamp, loading, refresh };
+}
+
 export interface FavoritedClip extends Clip {
   favoritedAt: string;
 }

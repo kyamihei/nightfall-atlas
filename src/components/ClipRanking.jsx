@@ -113,8 +113,6 @@ function ClipRow({
   avatarUrl,
   clipperRank,
 }) {
-  const [stampPickerOpen, setStampPickerOpen] = useState(false);
-  const totalStampCount = stampCounts ? Object.values(stampCounts).reduce((sum, n) => sum + (n || 0), 0) : 0;
   // このクリップのコメント購読はここ1箇所のみで行い、サイドパネル用のデータは
   // onCommentsUpdate経由で親に伝える（同一clipへの二重購読はSupabase Realtimeがエラーになるため）
   const commentsState = useComments(clip.id);
@@ -163,6 +161,7 @@ function ClipRow({
         </div>
 
         <button
+          className="cv-clip-thumb"
           onClick={(e) => {
             e.stopPropagation();
             setPlayerOpen((o) => !o);
@@ -194,7 +193,7 @@ function ClipRow({
             style={styles.clipTitleLink}
             onClick={(e) => e.stopPropagation()}
           >
-            <p className="clip-title-font" style={styles.clipTitle}>{clip.title}</p>
+            <p className="clip-title-font cv-clip-title" style={styles.clipTitle}>{clip.title}</p>
           </Link>
           <p style={styles.metaLine}>
             <Link
@@ -309,49 +308,30 @@ function ClipRow({
             />
             {favoriteCount > 0 ? favoriteCount : ""}
           </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setStampPickerOpen((o) => !o);
-            }}
-            style={{
-              ...styles.actionBtn,
-              ...styles.favBtn,
-              color: stampPickerOpen ? "#EDEDF2" : "#8A8A99",
-              borderColor: stampPickerOpen ? "#3A3A48" : "#2E2E3A",
-            }}
-            aria-label="リアクションスタンプ"
-            title="リアクションスタンプ"
-          >
-            <span style={{ fontSize: 14 }}>😲</span>
-            {totalStampCount > 0 ? totalStampCount : ""}
-          </button>
         </div>
       </div>
 
-      {stampPickerOpen && (
-        <div className="cv-fade-in" style={styles.stampPickerRow} onClick={(e) => e.stopPropagation()}>
-          {REACTION_STAMPS.map((stamp) => {
-            const count = stampCounts?.[stamp] ?? 0;
-            const selected = myStamps?.has(stamp) ?? false;
-            return (
-              <button
-                key={stamp}
-                onClick={() => onToggleStamp(clip.id, stamp)}
-                style={{
-                  ...styles.stampBtn,
-                  color: selected ? "#FFC857" : "#8A8A99",
-                  borderColor: selected ? "#FFC85755" : "#2E2E3A",
-                  background: selected ? "#3A2E1466" : "transparent",
-                }}
-              >
-                {stamp}
-                {count > 0 && <span style={styles.stampCount}>{count}</span>}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      <div className="cv-fade-in" style={styles.stampPickerRow} onClick={(e) => e.stopPropagation()}>
+        {REACTION_STAMPS.map((stamp) => {
+          const count = stampCounts?.[stamp] ?? 0;
+          const selected = myStamps?.has(stamp) ?? false;
+          return (
+            <button
+              key={stamp}
+              onClick={() => onToggleStamp(clip.id, stamp)}
+              style={{
+                ...styles.stampBtn,
+                color: selected ? "#FFC857" : "#8A8A99",
+                borderColor: selected ? "#FFC85755" : "#2E2E3A",
+                background: selected ? "#3A2E1466" : "transparent",
+              }}
+            >
+              {stamp}
+              {count > 0 && <span style={styles.stampCount}>{count}</span>}
+            </button>
+          );
+        })}
+      </div>
 
       {playerOpen && (
         <div className="cv-fade-in" style={styles.playerPanel} onClick={(e) => e.stopPropagation()}>
@@ -614,7 +594,7 @@ function SkeletonRow({ delay }) {
     <div style={{ ...styles.row, animationDelay: `${delay}ms` }} className="cv-fade-in-up">
       <div style={styles.rowMain}>
         <div className="cv-skeleton" style={styles.skeletonRank} />
-        <div className="cv-skeleton" style={styles.skeletonThumb} />
+        <div className="cv-skeleton cv-clip-thumb" style={styles.skeletonThumb} />
         <div style={{ ...styles.infoCol, display: "flex", flexDirection: "column", gap: 8 }}>
           <div className="cv-skeleton" style={styles.skeletonTitle} />
           <div className="cv-skeleton" style={styles.skeletonMeta} />
@@ -741,9 +721,25 @@ export default function ClipRanking() {
         .clip-title-font { font-family: 'Oswald', sans-serif; }
         button { cursor: pointer; }
         textarea:focus, input:focus { outline: 2px solid #FF4D6D33; }
+        .cv-nav-link {
+          transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+        }
+        .cv-nav-link:hover {
+          background: #FF4D6D14;
+          border-color: #FF4D6D55;
+          color: #EDEDF2;
+          transform: translateY(-1px);
+        }
+        .cv-clip-thumb { width: 64px; height: 44px; }
+        .cv-clip-title { font-size: 15px; }
+        @media (min-width: 901px) {
+          .cv-clip-thumb { width: 132px; height: 74px; }
+          .cv-clip-title { font-size: 19px; }
+        }
         @media (max-width: 640px) {
           .cv-header { flex-direction: column; align-items: flex-start; }
           .cv-header-controls { align-items: flex-start; width: 100%; }
+          .cv-nav-links { justify-content: flex-start; }
           .cv-search-box { width: 100%; }
           .cv-row-main { flex-wrap: wrap; row-gap: 10px; }
           .cv-row-actions { flex-basis: 100%; justify-content: flex-end; }
@@ -762,31 +758,35 @@ export default function ClipRanking() {
           <p style={styles.tagline}>みんなのお気に入りのクリップにコメントしてみよう！</p>
         </div>
         <div className="cv-header-controls" style={styles.headerControls}>
-          <div style={styles.headerLinks}>
-            <Link to="/broadcasters" style={styles.broadcastersLink}>
-              <Users size={13} />
+          <div className="cv-nav-links" style={styles.headerLinks}>
+            <Link to="/broadcasters" className="cv-nav-link" style={styles.navLink}>
+              <Users size={15} />
               配信者一覧
             </Link>
-            <Link to="/clippers" style={styles.broadcastersLink}>
-              <Scissors size={13} />
+            <Link to="/clippers" className="cv-nav-link" style={styles.navLink}>
+              <Scissors size={15} />
               クリップ職人
             </Link>
-            <Link to="/search" style={styles.broadcastersLink}>
-              <Search size={13} />
+            <Link to="/search" className="cv-nav-link" style={styles.navLink}>
+              <Search size={15} />
               クリップ検索
             </Link>
-            <Link to="/general" style={styles.broadcastersLink}>
-              <MessageSquare size={13} />
+            <Link to="/general" className="cv-nav-link" style={styles.navLink}>
+              <MessageSquare size={15} />
               総合スレ
             </Link>
             {REACTIONS_ENABLED && (
-              <Link to="/my-reactions" style={styles.broadcastersLink}>
-                <ListChecks size={13} />
+              <Link to="/my-reactions" className="cv-nav-link" style={styles.navLink}>
+                <ListChecks size={15} />
                 評価した動画
               </Link>
             )}
-            <Link to="/favorites" style={styles.broadcastersLink}>
-              <Star size={13} />
+            <Link to="/my-stamps" className="cv-nav-link" style={styles.navLink}>
+              <span style={{ fontSize: 15, lineHeight: 1 }}>😲</span>
+              スタンプ一覧
+            </Link>
+            <Link to="/favorites" className="cv-nav-link" style={styles.navLink}>
+              <Star size={15} />
               お気に入り
             </Link>
           </div>
@@ -1009,15 +1009,21 @@ const styles = {
     paddingBottom: 20,
     marginBottom: 20,
   },
-  headerControls: { display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 },
-  headerLinks: { display: "flex", gap: 14 },
-  broadcastersLink: {
+  headerControls: { display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 10 },
+  headerLinks: { display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end" },
+  navLink: {
     display: "inline-flex",
     alignItems: "center",
-    gap: 5,
-    color: "#8A8A99",
-    fontSize: 12.5,
+    gap: 6,
+    background: "#1C1C26",
+    border: "1px solid #2E2E3A",
+    borderRadius: 8,
+    padding: "8px 14px",
+    color: "#C4C4D0",
+    fontSize: 13,
+    fontWeight: 600,
     textDecoration: "none",
+    whiteSpace: "nowrap",
   },
   searchBox: {
     display: "flex",
@@ -1239,14 +1245,12 @@ const styles = {
   },
   rowMain: { display: "flex", alignItems: "center", gap: 14 },
   skeletonRank: { width: 34, height: 26, borderRadius: 4, flexShrink: 0 },
-  skeletonThumb: { width: 64, height: 44, borderRadius: 6, flexShrink: 0 },
+  skeletonThumb: { borderRadius: 6, flexShrink: 0 },
   skeletonTitle: { width: "70%", height: 14, borderRadius: 4 },
   skeletonMeta: { width: "40%", height: 11, borderRadius: 4 },
   skeletonPill: { width: 52, height: 26, borderRadius: 8 },
   rankNum: { fontSize: 26, fontWeight: 600, width: 34, flexShrink: 0 },
   thumb: {
-    width: 64,
-    height: 44,
     borderRadius: 6,
     display: "flex",
     alignItems: "center",
@@ -1271,8 +1275,7 @@ const styles = {
   rowAvatar: { width: 16, height: 16, borderRadius: "50%", objectFit: "cover" },
   rowAvatarFallback: { width: 16, height: 16, borderRadius: "50%", background: "#20202B", display: "inline-block" },
   clipTitle: {
-    fontSize: 15,
-    fontWeight: 500,
+    fontWeight: 600,
     margin: "0 0 4px",
     lineHeight: 1.3,
     overflow: "hidden",
