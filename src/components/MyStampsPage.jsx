@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Loader2, Film } from "lucide-react";
+import { ArrowLeft, Loader2, Film, Smile } from "lucide-react";
 import { useMyStamps, useBroadcasterAvatars, REACTION_STAMPS } from "../lib/use-clip-ranking";
 import Footer from "./Footer";
 
@@ -50,7 +50,7 @@ export default function MyStampsPage() {
 
       <header style={styles.header}>
         <h1 className="clip-title-font" style={styles.h1}>
-          <span style={{ fontSize: 20, marginRight: 8, verticalAlign: -2 }}>😲</span>
+          <Smile size={20} style={{ marginRight: 8, verticalAlign: -3 }} />
           スタンプを押したクリップ
         </h1>
         <p style={styles.tagline}>スタンプの種類ごとに、自分が押したクリップを確認できます</p>

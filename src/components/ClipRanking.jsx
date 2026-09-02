@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, Users, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare } from "lucide-react";
+import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, Users, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, Smile } from "lucide-react";
 import {
   useClips,
   useReactions,
@@ -782,7 +782,7 @@ export default function ClipRanking() {
               </Link>
             )}
             <Link to="/my-stamps" className="cv-nav-link" style={styles.navLink}>
-              <span style={{ fontSize: 15, lineHeight: 1 }}>😲</span>
+              <Smile size={15} />
               スタンプ一覧
             </Link>
             <Link to="/favorites" className="cv-nav-link" style={styles.navLink}>
