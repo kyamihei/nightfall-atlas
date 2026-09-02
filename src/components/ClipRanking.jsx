@@ -95,6 +95,7 @@ function ClipRow({
 
   return (
     <div
+      className="clip-row"
       style={{ ...styles.row, cursor: "pointer" }}
       onClick={() => onOpenComments(clip.id)}
     >
@@ -406,6 +407,8 @@ export default function ClipRanking() {
         .clip-title-font { font-family: 'Oswald', sans-serif; }
         button { cursor: pointer; }
         textarea:focus, input:focus { outline: 2px solid #FF4D6D33; }
+        .clip-row { transition: background-color 0.15s ease, border-color 0.15s ease; }
+        .clip-row:hover { background: #22222E; border-color: #33333F; }
       `}</style>
 
       <header style={styles.header}>
