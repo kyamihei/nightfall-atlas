@@ -122,6 +122,36 @@ Twitchクリップのランキング掲示板。いいね/よくないねの反�
   （service_roleはバックエンド専用の鍵で一般公開されないため安全）。今後service_role経由で
   重い処理を追加する際はこの制約を踏まえること。
 
+## いいね/よくないねの無効化とお気に入り数順ソート（2026-09-03追加）
+
+- いいね/よくないね機能はUI上から非表示にした（`src/lib/feature-flags.js`の`REACTIONS_ENABLED = false`）。
+  復活させる場合はこの1箇所をtrueに戻すだけでよい。バックエンド（`reactions`テーブル、
+  `useReactions`、`get_ranked_clips`のsort_by='likes'分岐等）はすべて残したまま、
+  フロント側のボタン・ナビゲーションリンク・並び替え選択肢だけを条件分岐で隠している。
+  - `ClipRanking.jsx` / `ClipDetail.jsx`: Heart/ThumbsDownボタンを`{REACTIONS_ENABLED && (...)}`で包む。
+  - ヘッダーの「評価した動画」リンク、`MyFavorites.jsx`からの相互リンクも同様に隠す。
+  - `MyReactions.jsx`（`/my-reactions`）はナビ導線を消しただけでは直接URLアクセスを防げないため、
+    コンポーネント自身の先頭で`if (!REACTIONS_ENABLED)`のガードを入れて簡易メッセージを表示している。
+- 代わりに「お気に入り数順」ソートを追加（`get_ranked_clips`のsort_by='favorites'、likes/commentsと
+  同じ「favoritesテーブルを起点にclipsへJOIN」パターン）。件数表示用に`get_favorite_counts(clip_ids)`
+  RPC（`get_reaction_counts`と同じ発想）と`useFavoriteCounts`フックを追加し、お気に入りボタンの隣に
+  件数を出す。トグル後は`useFavorites`の`toggle`とは別に明示的に`refreshFavoriteCounts()`を呼んで
+  即時反映させている（2つのフックが独立しているため）。
+- **ハマった点**: `get_ranked_clips`のようにRETURNS TABLEの列を追加する関数は、
+  `create or replace`の前に必ず同じ引数シグネチャで`drop function if exists`すること。
+  `get_top_clippers_by_period`にoffset引数を追加した際、dropを忘れたため3引数版と4引数版が
+  別関数として共存してしまい、PostgRESTが「どちらを呼ぶか一意に決められない」エラーを返すようになり、
+  トップページの週間クリップ職人ランキングが丸ごと表示されなくなった（本番で発生・修正済み）。
+- **ハマった点その2**: `ClipDetail.jsx`で`const clipIds = clip ? [clip.id] : [];`のように
+  配列リテラルを毎レンダー作ってuseReactions/useFavorites/useFavoriteCounts等に渡すと、
+  それらのuseEffectが`[clipIds]`（配列の参照）に依存しているため、非同期取得→setState→
+  再レンダー→配列再生成→useEffect再発火…の無限ループ（"Maximum update depth exceeded"）になる。
+  `useFavoriteCounts`追加時に実際に発生した。`useMemo(() => clip ? [clip.id] : [], [clip])`で
+  参照を安定させて修正。`ClipRanking.jsx`側は元々`useMemo`で対策済みだったが、
+  `ClipDetail.jsx`は対策されていなかった。**クリップID配列を複数のフックに渡す箇所を今後追加する際は、
+  必ず`useMemo`で参照を安定させること**（`useBroadcasterAvatars`/`useClipperRanks`のように
+  文字列キーへ変換してから依存配列に使う方式でもよい）。
+
 ## 認証
 
 - ログイン機能はなく、Supabase Anonymous Auth（匿名サインイン）でブラウザごとにanon_idを発行・永続化し、いいね/よくないね/お気に入り/コメントを紐付けている

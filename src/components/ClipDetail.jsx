@@ -1,15 +1,17 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, Heart, ThumbsDown, Star, Send, Flag, Loader2, CornerUpLeft, X, Scissors } from "lucide-react";
 import {
   useClip,
   useReactions,
   useFavorites,
+  useFavoriteCounts,
   useComments,
   useCommentReport,
   useBroadcasterAvatars,
   useClipperRanks,
 } from "../lib/use-clip-ranking";
+import { REACTIONS_ENABLED } from "../lib/feature-flags";
 
 function formatViews(n) {
   return new Intl.NumberFormat("ja-JP").format(n);
@@ -39,9 +41,17 @@ function timeAgo(ts) {
 export default function ClipDetail() {
   const { id } = useParams();
   const { clip, loading, error } = useClip(id);
-  const clipIds = clip ? [clip.id] : [];
+  // clip ? [clip.id] : [] を毎レンダー新しい配列として作ると、これに依存する
+  // useReactions/useFavorites/useFavoriteCountsのuseEffectが再発火し続け、
+  // 非同期取得→setState→再レンダー→配列再生成…の無限ループになる（実際に発生・修正）。
+  const clipIds = useMemo(() => (clip ? [clip.id] : []), [clip]);
   const { counts, myVotes, vote } = useReactions(clipIds);
-  const { favoritedIds, toggle: toggleFavorite } = useFavorites(clipIds);
+  const { favoritedIds, toggle: toggleFavoriteRaw } = useFavorites(clipIds);
+  const { counts: favoriteCounts, refresh: refreshFavoriteCounts } = useFavoriteCounts(clipIds);
+  async function toggleFavorite(clipId) {
+    await toggleFavoriteRaw(clipId);
+    refreshFavoriteCounts();
+  }
   const avatars = useBroadcasterAvatars(clip ? [clip.streamer] : []);
   const clipperRanks = useClipperRanks(clip ? [clip.creator_id] : []);
   const { comments, submit, submitting, error: commentError } = useComments(id);
@@ -151,30 +161,34 @@ export default function ClipDetail() {
       )}
 
       <div style={styles.actions}>
-        <button
-          onClick={() => vote(clip.id, "like")}
-          style={{
-            ...styles.actionBtn,
-            color: myVote === "like" ? "#FF4D6D" : "#8A8A99",
-            borderColor: myVote === "like" ? "#FF4D6D55" : "#2E2E3A",
-          }}
-          aria-label="いいね"
-        >
-          <Heart size={16} fill={myVote === "like" ? "#FF4D6D" : "none"} />
-          {stats.likes}
-        </button>
-        <button
-          onClick={() => vote(clip.id, "dislike")}
-          style={{
-            ...styles.actionBtn,
-            color: myVote === "dislike" ? "#4DD8FF" : "#8A8A99",
-            borderColor: myVote === "dislike" ? "#4DD8FF55" : "#2E2E3A",
-          }}
-          aria-label="よくないね"
-        >
-          <ThumbsDown size={16} fill={myVote === "dislike" ? "#4DD8FF" : "none"} />
-          {stats.dislikes}
-        </button>
+        {REACTIONS_ENABLED && (
+          <>
+            <button
+              onClick={() => vote(clip.id, "like")}
+              style={{
+                ...styles.actionBtn,
+                color: myVote === "like" ? "#FF4D6D" : "#8A8A99",
+                borderColor: myVote === "like" ? "#FF4D6D55" : "#2E2E3A",
+              }}
+              aria-label="いいね"
+            >
+              <Heart size={16} fill={myVote === "like" ? "#FF4D6D" : "none"} />
+              {stats.likes}
+            </button>
+            <button
+              onClick={() => vote(clip.id, "dislike")}
+              style={{
+                ...styles.actionBtn,
+                color: myVote === "dislike" ? "#4DD8FF" : "#8A8A99",
+                borderColor: myVote === "dislike" ? "#4DD8FF55" : "#2E2E3A",
+              }}
+              aria-label="よくないね"
+            >
+              <ThumbsDown size={16} fill={myVote === "dislike" ? "#4DD8FF" : "none"} />
+              {stats.dislikes}
+            </button>
+          </>
+        )}
         <button
           onClick={() => toggleFavorite(clip.id)}
           style={{
@@ -186,6 +200,7 @@ export default function ClipDetail() {
         >
           <Star size={16} fill={favoritedIds.has(clip.id) ? "#FFC857" : "none"} />
           {favoritedIds.has(clip.id) ? "お気に入り済み" : "お気に入り"}
+          {favoriteCounts[clip.id] > 0 ? `（${favoriteCounts[clip.id]}）` : ""}
         </button>
       </div>
 

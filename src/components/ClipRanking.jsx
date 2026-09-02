@@ -5,6 +5,7 @@ import {
   useClips,
   useReactions,
   useFavorites,
+  useFavoriteCounts,
   useComments,
   useBroadcasterSearch,
   useBroadcasterRequest,
@@ -13,6 +14,7 @@ import {
   useClipperRanks,
   useTopClippersByPeriod,
 } from "../lib/use-clip-ranking";
+import { REACTIONS_ENABLED } from "../lib/feature-flags";
 
 const PERIOD_TABS = [
   { value: "all", label: "全期間" },
@@ -24,7 +26,8 @@ const PERIOD_TABS = [
 const SORT_OPTIONS = [
   { value: "views", label: "視聴回数順" },
   { value: "newest", label: "新着順" },
-  { value: "likes", label: "いいね順" },
+  ...(REACTIONS_ENABLED ? [{ value: "likes", label: "いいね順" }] : []),
+  { value: "favorites", label: "お気に入り数順" },
   { value: "comments", label: "コメント数順" },
 ];
 
@@ -95,6 +98,7 @@ function ClipRow({
   onVote,
   isFavorited,
   onToggleFavorite,
+  favoriteCount,
   commentsActive,
   onOpenComments,
   onCommentsUpdate,
@@ -211,48 +215,52 @@ function ClipRow({
         </div>
 
         <div className="cv-row-actions" style={styles.actions}>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setLikeBump((n) => n + 1);
-              onVote(clip.id, "like");
-            }}
-            style={{
-              ...styles.actionBtn,
-              color: myVote === "like" ? "#FF4D6D" : "#8A8A99",
-              borderColor: myVote === "like" ? "#FF4D6D55" : "#2E2E3A",
-            }}
-            aria-label="いいね"
-          >
-            <Heart
-              key={likeBump}
-              className={likeBump > 0 ? "cv-pop" : undefined}
-              size={15}
-              fill={myVote === "like" ? "#FF4D6D" : "none"}
-            />
-            {likes}
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setDislikeBump((n) => n + 1);
-              onVote(clip.id, "dislike");
-            }}
-            style={{
-              ...styles.actionBtn,
-              color: myVote === "dislike" ? "#4DD8FF" : "#8A8A99",
-              borderColor: myVote === "dislike" ? "#4DD8FF55" : "#2E2E3A",
-            }}
-            aria-label="よくないね"
-          >
-            <ThumbsDown
-              key={dislikeBump}
-              className={dislikeBump > 0 ? "cv-pop" : undefined}
-              size={15}
-              fill={myVote === "dislike" ? "#4DD8FF" : "none"}
-            />
-            {dislikes}
-          </button>
+          {REACTIONS_ENABLED && (
+            <>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLikeBump((n) => n + 1);
+                  onVote(clip.id, "like");
+                }}
+                style={{
+                  ...styles.actionBtn,
+                  color: myVote === "like" ? "#FF4D6D" : "#8A8A99",
+                  borderColor: myVote === "like" ? "#FF4D6D55" : "#2E2E3A",
+                }}
+                aria-label="いいね"
+              >
+                <Heart
+                  key={likeBump}
+                  className={likeBump > 0 ? "cv-pop" : undefined}
+                  size={15}
+                  fill={myVote === "like" ? "#FF4D6D" : "none"}
+                />
+                {likes}
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDislikeBump((n) => n + 1);
+                  onVote(clip.id, "dislike");
+                }}
+                style={{
+                  ...styles.actionBtn,
+                  color: myVote === "dislike" ? "#4DD8FF" : "#8A8A99",
+                  borderColor: myVote === "dislike" ? "#4DD8FF55" : "#2E2E3A",
+                }}
+                aria-label="よくないね"
+              >
+                <ThumbsDown
+                  key={dislikeBump}
+                  className={dislikeBump > 0 ? "cv-pop" : undefined}
+                  size={15}
+                  fill={myVote === "dislike" ? "#4DD8FF" : "none"}
+                />
+                {dislikes}
+              </button>
+            </>
+          )}
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -289,6 +297,7 @@ function ClipRow({
               size={15}
               fill={isFavorited ? "#FFC857" : "none"}
             />
+            {favoriteCount > 0 ? favoriteCount : ""}
           </button>
         </div>
       </div>
@@ -540,7 +549,15 @@ export default function ClipRanking() {
   );
   const clipIds = useMemo(() => clips.map((c) => c.id), [clips]);
   const { counts, myVotes, vote } = useReactions(clipIds);
-  const { favoritedIds, toggle: toggleFavorite } = useFavorites(clipIds);
+  const { favoritedIds, toggle: toggleFavoriteRaw } = useFavorites(clipIds);
+  const { counts: favoriteCounts, refresh: refreshFavoriteCounts } = useFavoriteCounts(clipIds);
+  const toggleFavorite = useCallback(
+    async (clipId) => {
+      await toggleFavoriteRaw(clipId);
+      refreshFavoriteCounts();
+    },
+    [toggleFavoriteRaw, refreshFavoriteCounts],
+  );
   const streamerNames = useMemo(() => [...new Set(clips.map((c) => c.streamer))], [clips]);
   const avatars = useBroadcasterAvatars(streamerNames);
   const creatorIds = useMemo(() => clips.map((c) => c.creator_id), [clips]);
@@ -656,10 +673,12 @@ export default function ClipRanking() {
               <Scissors size={13} />
               クリップ職人
             </Link>
-            <Link to="/my-reactions" style={styles.broadcastersLink}>
-              <ListChecks size={13} />
-              評価した動画
-            </Link>
+            {REACTIONS_ENABLED && (
+              <Link to="/my-reactions" style={styles.broadcastersLink}>
+                <ListChecks size={13} />
+                評価した動画
+              </Link>
+            )}
             <Link to="/favorites" style={styles.broadcastersLink}>
               <Star size={13} />
               お気に入り
@@ -797,6 +816,7 @@ export default function ClipRanking() {
                 onVote={vote}
                 isFavorited={favoritedIds.has(clip.id)}
                 onToggleFavorite={toggleFavorite}
+                favoriteCount={favoriteCounts[clip.id] || 0}
                 commentsActive={activeCommentClipId === clip.id}
                 onOpenComments={toggleComments}
                 onCommentsUpdate={handleCommentsUpdate}
@@ -832,7 +852,7 @@ export default function ClipRanking() {
       )}
 
       <footer style={styles.footer}>
-        いいね・よくないね・コメントはすべてのブラウザで共有されます。
+        お気に入り・コメントはすべてのブラウザで共有されます。
       </footer>
 
       {activeCommentClipId && (() => {

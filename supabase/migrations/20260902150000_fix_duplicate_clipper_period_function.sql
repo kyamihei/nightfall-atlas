@@ -259,16 +259,6 @@ returns table(clip_id text, likes bigint, dislikes bigint) as $$
   group by clip_id;
 $$ language sql stable;
 
--- クリップIDの配列を渡すと、それぞれのお気に入り数をまとめて返す関数（get_reaction_countsと同じ発想）。
--- お気に入り数順ソート導入時に、一覧表示で件数を出すために追加。
-create or replace function get_favorite_counts(clip_ids text[])
-returns table(clip_id text, favorite_count bigint) as $$
-  select clip_id, count(*) as favorite_count
-  from favorites
-  where clip_id = any(clip_ids)
-  group by clip_id;
-$$ language sql stable;
-
 -- ============================================================
 -- 配信者/クリッパーランキングの事前集計ビュー
 -- ============================================================
@@ -537,7 +527,6 @@ returns table(
   likes bigint,
   dislikes bigint,
   comment_count bigint,
-  favorite_count bigint,
   total_count bigint
 ) as $$
 declare
@@ -568,7 +557,7 @@ begin
       select
         m.id, m.title, m.streamer, m.game, m.view_count, m.thumbnail_url, m.twitch_created_at,
         m.creator_id, m.creator_name,
-        m.likes, m.dislikes, 0::bigint as comment_count, 0::bigint as favorite_count,
+        m.likes, m.dislikes, 0::bigint as comment_count,
         count(*) over() as total_count
       from matched m
       order by m.likes desc, m.view_count desc, m.id
@@ -591,34 +580,10 @@ begin
       select
         m.id, m.title, m.streamer, m.game, m.view_count, m.thumbnail_url, m.twitch_created_at,
         m.creator_id, m.creator_name,
-        0::bigint as likes, 0::bigint as dislikes, m.comment_count, 0::bigint as favorite_count,
+        0::bigint as likes, 0::bigint as dislikes, m.comment_count,
         count(*) over() as total_count
       from matched m
       order by m.comment_count desc, m.view_count desc, m.id
-      limit page_limit offset page_offset;
-  elsif sort_by = 'favorites' then
-    -- お気に入り数順。favoritesテーブル（小さい）を起点にclipsへJOINする、likes/commentsと同じ設計。
-    -- 「お気に入りが0件のクリップ」はこのランキングには現れない。
-    return query
-      with agg as (
-        select fv.clip_id, count(*) as favorite_count
-        from favorites fv
-        group by fv.clip_id
-      ),
-      matched as (
-        select c.*, a.favorite_count
-        from agg a
-        join clips c on c.id = a.clip_id
-        where c.twitch_created_at >= period_start
-          and c.twitch_created_at < period_end
-      )
-      select
-        m.id, m.title, m.streamer, m.game, m.view_count, m.thumbnail_url, m.twitch_created_at,
-        m.creator_id, m.creator_name,
-        0::bigint as likes, 0::bigint as dislikes, 0::bigint as comment_count, m.favorite_count,
-        count(*) over() as total_count
-      from matched m
-      order by m.favorite_count desc, m.view_count desc, m.id
       limit page_limit offset page_offset;
   elsif sort_by = 'newest' then
     -- 「全期間」（絞り込みなし）の正確なCOUNT(*)はclips全件を走査するため、
@@ -643,7 +608,6 @@ begin
         0::bigint as likes,
         0::bigint as dislikes,
         0::bigint as comment_count,
-        0::bigint as favorite_count,
         v_total as total_count
       from clips c
       where c.twitch_created_at >= period_start
@@ -667,7 +631,6 @@ begin
         0::bigint as likes,
         0::bigint as dislikes,
         0::bigint as comment_count,
-        0::bigint as favorite_count,
         v_total as total_count
       from clips c
       where c.twitch_created_at >= period_start

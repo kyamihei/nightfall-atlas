@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Loader2, Star } from "lucide-react";
 import { useMyReactions, useBroadcasterAvatars } from "../lib/use-clip-ranking";
+import { REACTIONS_ENABLED } from "../lib/feature-flags";
 
 function formatViews(n) {
   return new Intl.NumberFormat("ja-JP").format(n);
@@ -24,6 +25,21 @@ export default function MyReactions() {
   const clips = tab === "like" ? likedClips : dislikedClips;
   const streamerNames = useMemo(() => [...new Set(clips.map((c) => c.streamer))], [clips]);
   const avatars = useBroadcasterAvatars(streamerNames);
+
+  // いいね/よくないね機能は現在サイト上から非表示にしている（いつでもREACTIONS_ENABLEDを
+  // trueに戻せば復活する）。ナビゲーションからの導線は消してあるが、URLを直接叩かれた場合に
+  // 備えてページ自体もガードしておく。
+  if (!REACTIONS_ENABLED) {
+    return (
+      <div style={styles.page}>
+        <Link to="/" style={styles.backLink}>
+          <ArrowLeft size={14} />
+          ランキングに戻る
+        </Link>
+        <div style={styles.emptyState}>この機能は現在ご利用いただけません。</div>
+      </div>
+    );
+  }
 
   return (
     <div style={styles.page}>

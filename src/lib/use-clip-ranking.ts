@@ -277,6 +277,35 @@ export function useFavorites(clipIds: string[]) {
   return { favoritedIds, toggle };
 }
 
+/**
+ * クリップIDの配列から、それぞれの合計お気に入り数（全ユーザー分）をまとめて取得する。
+ * useFavoritesは自分自身の「お気に入りしているか」だけを扱うので、一覧表示用の件数はこちらで別途取得する
+ * （get_reaction_counts/useReactionsと同じ構成）。
+ */
+export function useFavoriteCounts(clipIds: string[]) {
+  const [counts, setCounts] = useState<Record<string, number>>({});
+
+  const refresh = useCallback(async () => {
+    if (clipIds.length === 0) {
+      setCounts({});
+      return;
+    }
+    const { data, error } = await supabase.rpc("get_favorite_counts", { clip_ids: clipIds });
+    if (error) return;
+    const next: Record<string, number> = {};
+    for (const row of (data ?? []) as { clip_id: string; favorite_count: number }[]) {
+      next[row.clip_id] = Number(row.favorite_count);
+    }
+    setCounts(next);
+  }, [clipIds]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  return { counts, refresh };
+}
+
 export interface ReactedClip extends Clip {
   reactedAt: string;
 }

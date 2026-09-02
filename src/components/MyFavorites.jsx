@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Loader2, Star, Film, ListChecks } from "lucide-react";
 import { useMyFavorites, useBroadcasterAvatars } from "../lib/use-clip-ranking";
+import { REACTIONS_ENABLED } from "../lib/feature-flags";
 
 function formatViews(n) {
   return new Intl.NumberFormat("ja-JP").format(n);
@@ -53,10 +54,12 @@ export default function MyFavorites() {
             <Star size={20} color="#FFC857" fill="#FFC857" style={{ marginRight: 8, verticalAlign: -2 }} />
             お気に入り（{favoritedClips.length}）
           </h1>
-          <Link to="/my-reactions" style={styles.favoritesLink}>
-            <ListChecks size={13} />
-            評価した動画を見る
-          </Link>
+          {REACTIONS_ENABLED && (
+            <Link to="/my-reactions" style={styles.favoritesLink}>
+              <ListChecks size={13} />
+              評価した動画を見る
+            </Link>
+          )}
         </div>
         <p style={styles.tagline}>登録した順に新しいものから表示しています</p>
       </header>
