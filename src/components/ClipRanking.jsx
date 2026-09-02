@@ -10,6 +10,8 @@ import {
   useBroadcasterRequest,
   useCommentReport,
   useBroadcasterAvatars,
+  useClipperRanks,
+  useTopClippersByPeriod,
 } from "../lib/use-clip-ranking";
 
 const PERIOD_TABS = [
@@ -97,6 +99,7 @@ function ClipRow({
   onOpenComments,
   onCommentsUpdate,
   avatarUrl,
+  clipperRank,
 }) {
   // このクリップのコメント購読はここ1箇所のみで行い、サイドパネル用のデータは
   // onCommentsUpdate経由で親に伝える（同一clipへの二重購読はSupabase Realtimeがエラーになるため）
@@ -194,6 +197,17 @@ function ClipRow({
             </Link>
             {" ・ ▶ "}{formatViews(clip.view_count)}回視聴
           </p>
+          {clip.creator_id && (
+            <Link
+              to={`/clippers/${encodeURIComponent(clip.creator_id)}`}
+              style={styles.clipperLine}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Scissors size={11} />
+              {clip.creator_name}
+              {clipperRank && <span style={styles.clipperRankBadge}>総合{clipperRank}位</span>}
+            </Link>
+          )}
         </div>
 
         <div className="cv-row-actions" style={styles.actions}>
@@ -436,6 +450,59 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
   );
 }
 
+const WEEKLY_RANK_ACCENTS = { 1: "#FFC857", 2: "#C9CEDA", 3: "#D98E5D" };
+
+/** トップページに表示する週間クリップ職人ランキング（直近7日間に作られたクリップの合計視聴回数順） */
+function WeeklyClipperBoard({ clippers, loading }) {
+  if (!loading && clippers.length === 0) return null;
+
+  return (
+    <div style={styles.weeklyBoard}>
+      <div style={styles.weeklyBoardHeader}>
+        <p style={styles.weeklyBoardTitle}>
+          <Scissors size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
+          週間クリップ職人ランキング
+        </p>
+        <Link to="/clippers" style={styles.weeklyBoardMore}>
+          全体ランキングを見る
+          <ChevronRight size={12} />
+        </Link>
+      </div>
+      <div style={styles.weeklyBoardList}>
+        {loading
+          ? Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="cv-skeleton" style={styles.weeklyChipSkeleton} />
+            ))
+          : clippers.map((c, i) => {
+              const rank = i + 1;
+              const accent = WEEKLY_RANK_ACCENTS[rank] || null;
+              return (
+                <Link
+                  key={c.creator_id}
+                  to={`/clippers/${encodeURIComponent(c.creator_id)}`}
+                  style={{
+                    ...styles.weeklyChip,
+                    borderColor: accent ? `${accent}55` : styles.weeklyChip.borderColor,
+                  }}
+                >
+                  <span style={{ ...styles.weeklyChipRank, color: accent || "#8A8A99" }}>{rank}</span>
+                  {c.profile_image_url ? (
+                    <img src={c.profile_image_url} alt="" style={styles.weeklyChipAvatar} />
+                  ) : (
+                    <span style={styles.weeklyChipAvatarFallback} />
+                  )}
+                  <span style={styles.weeklyChipInfo}>
+                    <span style={styles.weeklyChipName}>{c.creator_name}</span>
+                    <span style={styles.weeklyChipViews}>{formatViews(c.total_views)}回視聴</span>
+                  </span>
+                </Link>
+              );
+            })}
+      </div>
+    </div>
+  );
+}
+
 /** 読み込み中に表示するクリップ行の骨組み（レイアウトのガタつきを防ぐ） */
 function SkeletonRow({ delay }) {
   return (
@@ -476,6 +543,21 @@ export default function ClipRanking() {
   const { favoritedIds, toggle: toggleFavorite } = useFavorites(clipIds);
   const streamerNames = useMemo(() => [...new Set(clips.map((c) => c.streamer))], [clips]);
   const avatars = useBroadcasterAvatars(streamerNames);
+  const creatorIds = useMemo(() => clips.map((c) => c.creator_id), [clips]);
+  const clipperRanks = useClipperRanks(creatorIds);
+
+  // 週間クリップ職人ランキング（トップページ表示用）。7日間の範囲はマウント時に1度だけ固定し、
+  // 毎レンダーでnew Date()を作って参照が変わり続ける（＝useEffectが無限に再発火する）のを防ぐ。
+  const weekRange = useMemo(() => {
+    const end = new Date();
+    const start = new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000);
+    return { start: start.toISOString(), end: end.toISOString() };
+  }, []);
+  const { clippers: weeklyClippers, loading: weeklyClippersLoading } = useTopClippersByPeriod(
+    weekRange.start,
+    weekRange.end,
+    5,
+  );
 
   const [activeCommentClipId, setActiveCommentClipId] = useState(null);
   const [commentsDataByClip, setCommentsDataByClip] = useState({});
@@ -594,6 +676,8 @@ export default function ClipRanking() {
           </div>
         </div>
       </header>
+
+      <WeeklyClipperBoard clippers={weeklyClippers} loading={weeklyClippersLoading} />
 
       <div className="cv-ranking-controls" style={styles.rankingControlsRow}>
         <div style={styles.periodTabs}>
@@ -717,6 +801,7 @@ export default function ClipRanking() {
                 onOpenComments={toggleComments}
                 onCommentsUpdate={handleCommentsUpdate}
                 avatarUrl={avatars[clip.streamer]}
+                clipperRank={clip.creator_id ? clipperRanks[clip.creator_id] : undefined}
               />
             );
           })}
@@ -870,6 +955,57 @@ const styles = {
     fontSize: 12.5,
   },
   dayTabs: { display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 16 },
+  weeklyBoard: {
+    background: "#1C1C26",
+    border: "1px solid #24242F",
+    borderRadius: 10,
+    padding: "14px 16px",
+    marginBottom: 20,
+  },
+  weeklyBoardHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  weeklyBoardTitle: { fontSize: 13.5, fontWeight: 600, color: "#EDEDF2", margin: 0, display: "flex", alignItems: "center" },
+  weeklyBoardMore: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 3,
+    fontSize: 12,
+    color: "#8A8A99",
+    textDecoration: "none",
+    flexShrink: 0,
+  },
+  weeklyBoardList: { display: "flex", gap: 10, overflowX: "auto", paddingBottom: 2 },
+  weeklyChip: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    background: "#20202B",
+    border: "1px solid #2E2E3A",
+    borderRadius: 8,
+    padding: "8px 12px",
+    textDecoration: "none",
+    color: "#EDEDF2",
+    flexShrink: 0,
+    minWidth: 160,
+  },
+  weeklyChipRank: { fontSize: 14, fontWeight: 700, width: 16, flexShrink: 0, textAlign: "center" },
+  weeklyChipAvatar: { width: 26, height: 26, borderRadius: "50%", objectFit: "cover", flexShrink: 0 },
+  weeklyChipAvatarFallback: { width: 26, height: 26, borderRadius: "50%", background: "#2A2A36", flexShrink: 0 },
+  weeklyChipInfo: { display: "flex", flexDirection: "column", minWidth: 0 },
+  weeklyChipName: {
+    fontSize: 12.5,
+    fontWeight: 500,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    maxWidth: 100,
+  },
+  weeklyChipViews: { fontSize: 11, color: "#6B6B78" },
+  weeklyChipSkeleton: { width: 160, height: 42, borderRadius: 8, flexShrink: 0 },
   pagination: {
     display: "flex",
     alignItems: "center",
@@ -990,6 +1126,23 @@ const styles = {
     WebkitBoxOrient: "vertical",
   },
   metaLine: { fontSize: 12.5, color: "#6B6B78", margin: 0 },
+  clipperLine: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+    fontSize: 11.5,
+    color: "#6B6B78",
+    textDecoration: "none",
+    margin: "4px 0 0",
+  },
+  clipperRankBadge: {
+    fontSize: 10.5,
+    fontWeight: 600,
+    color: "#1C1417",
+    background: "#FFC857",
+    borderRadius: 10,
+    padding: "1px 7px",
+  },
   actions: { display: "flex", gap: 6, flexShrink: 0 },
   actionBtn: {
     display: "flex",

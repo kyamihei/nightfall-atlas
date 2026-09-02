@@ -15,6 +15,8 @@ export interface Clip {
   view_count: number;
   thumbnail_url: string | null;
   twitch_created_at: string | null;
+  creator_id?: string | null;
+  creator_name?: string | null;
 }
 
 export interface ReactionCounts {
@@ -107,7 +109,7 @@ export function useClips(
       } else {
         const rows = (data ?? []) as (Clip & { total_count: number | string })[];
         setClips(
-          rows.map(({ id, title, streamer, game, view_count, thumbnail_url, twitch_created_at }) => ({
+          rows.map(({ id, title, streamer, game, view_count, thumbnail_url, twitch_created_at, creator_id, creator_name }) => ({
             id,
             title,
             streamer,
@@ -115,6 +117,8 @@ export function useClips(
             view_count,
             thumbnail_url,
             twitch_created_at,
+            creator_id,
+            creator_name,
           })),
         );
         setTotalCount(rows.length > 0 ? Number(rows[0].total_count) : 0);
@@ -142,7 +146,7 @@ export function useClip(clipId: string) {
     (async () => {
       const { data, error } = await supabase
         .from("clips")
-        .select("id, title, streamer, game, view_count, thumbnail_url, twitch_created_at")
+        .select("id, title, streamer, game, view_count, thumbnail_url, twitch_created_at, creator_id, creator_name")
         .eq("id", clipId)
         .maybeSingle();
       if (cancelled) return;
@@ -573,6 +577,7 @@ export interface TopClipper {
   total_views: number;
   clip_count: number;
   profile_image_url: string | null;
+  rank?: number;
 }
 
 /**
@@ -600,6 +605,66 @@ export function useTopClippers(limit = 20, offset = 0) {
       cancelled = true;
     };
   }, [limit, offset]);
+
+  return { clippers, loading };
+}
+
+/**
+ * 表示中のクリップの作者id一覧から、それぞれの総合ランキング順位（100位以内のみ）をまとめて取得する。
+ * ランキング外（101位以降・creator_id無し）のクリップは結果に含まれないので、呼び出し側で
+ * ranks[creatorId] が無ければ「ランキング外」として扱う。
+ */
+export function useClipperRanks(creatorIds: (string | null | undefined)[]) {
+  const [ranks, setRanks] = useState<Record<string, number>>({});
+  const key = [...new Set(creatorIds.filter(Boolean))].sort().join(",");
+
+  useEffect(() => {
+    const ids = key ? key.split(",") : [];
+    if (ids.length === 0) {
+      setRanks({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase.rpc("get_clipper_ranks", { target_creator_ids: ids });
+      if (cancelled || error) return;
+      const next: Record<string, number> = {};
+      for (const row of (data ?? []) as { creator_id: string; rank: number }[]) {
+        next[row.creator_id] = row.rank;
+      }
+      setRanks(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  return ranks;
+}
+
+/** 週間クリップ職人ランキング（トップページ表示用）。指定した期間内に作られたクリップの合計視聴回数順 */
+export function useTopClippersByPeriod(periodStart: string, periodEnd: string, limit = 5) {
+  const [clippers, setClippers] = useState<TopClipper[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const { data, error } = await supabase.rpc("get_top_clippers_by_period", {
+        period_start: periodStart,
+        period_end: periodEnd,
+        clipper_limit: limit,
+      });
+      if (cancelled) return;
+      if (!error) setClippers(data ?? []);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [periodStart, periodEnd, limit]);
 
   return { clippers, loading };
 }
@@ -681,6 +746,7 @@ export interface ClipperProfile {
   avatarUrl: string | null;
   totalViews: number;
   clipCount: number;
+  rank: number | null;
 }
 
 /**
@@ -701,6 +767,7 @@ export function useClipperProfile(
     avatarUrl: null,
     totalViews: 0,
     clipCount: 0,
+    rank: null,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -729,7 +796,7 @@ export function useClipperProfile(
       } else {
         const clips = (clipsRes.data ?? []) as (Clip & { creator_name: string | null })[];
         const stats = statsRes.data?.[0] as
-          | { total_views: number; clip_count: number; profile_image_url: string | null }
+          | { total_views: number; clip_count: number; profile_image_url: string | null; rank: number | null }
           | undefined;
         setProfile({
           clips,
@@ -737,6 +804,7 @@ export function useClipperProfile(
           avatarUrl: stats?.profile_image_url ?? null,
           totalViews: stats?.total_views ?? 0,
           clipCount: stats?.clip_count ?? 0,
+          rank: stats?.rank ?? null,
         });
         setError(null);
       }

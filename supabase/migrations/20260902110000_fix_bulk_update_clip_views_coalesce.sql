@@ -312,12 +312,6 @@ $$ language plpgsql security definer;
 revoke execute on function refresh_ranking_views() from public;
 grant execute on function refresh_ranking_views() to service_role;
 
--- REFRESH MATERIALIZED VIEW CONCURRENTLYは読み取りをブロックしない代わりに低速（本番実測で約19秒）で、
--- service_roleの既定statement_timeout（authenticatorから継承する8秒程度、実測9秒でタイムアウト）を
--- 超えてしまう。service_roleはバックエンドの同期スクリプト専用の鍵（一般公開されない）なので、
--- このロールに限りタイムアウトを緩和する。
-alter role service_role set statement_timeout = '120s';
-
 -- backfill-clip-creators.ts 専用のバルク更新RPC。
 -- clips.title等はNOT NULL制約があり、PostgRESTのupsertはON CONFLICT DO UPDATEのみが実行される
 -- 場合でもINSERT側の候補行としてNOT NULL列の値を要求してしまうため使えない（実測済み）。

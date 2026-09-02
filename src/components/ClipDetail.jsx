@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Heart, ThumbsDown, Star, Send, Flag, Loader2, CornerUpLeft, X } from "lucide-react";
+import { ArrowLeft, Heart, ThumbsDown, Star, Send, Flag, Loader2, CornerUpLeft, X, Scissors } from "lucide-react";
 import {
   useClip,
   useReactions,
@@ -8,6 +8,7 @@ import {
   useComments,
   useCommentReport,
   useBroadcasterAvatars,
+  useClipperRanks,
 } from "../lib/use-clip-ranking";
 
 function formatViews(n) {
@@ -42,6 +43,7 @@ export default function ClipDetail() {
   const { counts, myVotes, vote } = useReactions(clipIds);
   const { favoritedIds, toggle: toggleFavorite } = useFavorites(clipIds);
   const avatars = useBroadcasterAvatars(clip ? [clip.streamer] : []);
+  const clipperRanks = useClipperRanks(clip ? [clip.creator_id] : []);
   const { comments, submit, submitting, error: commentError } = useComments(id);
   const { report: reportComment } = useCommentReport();
 
@@ -138,6 +140,15 @@ export default function ClipDetail() {
         {" ・ "}
         {clip.game} ・ ▶ {formatViews(clip.view_count)}回視聴 ・ {formatDate(clip.twitch_created_at)}
       </p>
+      {clip.creator_id && (
+        <Link to={`/clippers/${encodeURIComponent(clip.creator_id)}`} style={styles.clipperLine}>
+          <Scissors size={12} />
+          クリップ職人: {clip.creator_name}
+          {clipperRanks[clip.creator_id] && (
+            <span style={styles.clipperRankBadge}>総合{clipperRanks[clip.creator_id]}位</span>
+          )}
+        </Link>
+      )}
 
       <div style={styles.actions}>
         <button
@@ -330,7 +341,25 @@ const styles = {
     borderRadius: 10,
   },
   title: { fontSize: 22, fontWeight: 600, margin: "0 0 8px", lineHeight: 1.3 },
-  metaLine: { fontSize: 13, color: "#8A8A99", margin: "0 0 18px" },
+  metaLine: { fontSize: 13, color: "#8A8A99", margin: "0 0 8px" },
+  clipperLine: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 12.5,
+    color: "#8A8A99",
+    textDecoration: "none",
+    marginBottom: 20,
+  },
+  clipperRankBadge: {
+    fontSize: 11,
+    fontWeight: 600,
+    color: "#1C1417",
+    background: "#FFC857",
+    borderRadius: 10,
+    padding: "1px 8px",
+    marginLeft: 2,
+  },
   streamerLink: {
     color: "#EDEDF2",
     fontWeight: 500,

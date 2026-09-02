@@ -7,8 +7,8 @@ Twitchクリップのランキング掲示板。いいね/よくないねの反�
 
 - フロント: React 19 + Vite + react-router-dom。UIはstyleオブジェクトによるインラインCSS（外部CSSフレームワークなし）。`src/styles/theme.css`（`main.jsx`でグローバル読み込み）に全ページ共通の演出（フォント読み込み・スクロールバー・ボタン押下フィードバック・フォーカスリング・`cv-`接頭辞の共通アニメーションクラス）を集約している
 - バックエンド: Supabase（Postgres + Auth匿名サインイン + Edge Functions + Realtime）
-- クリップ同期: `sync-twitch-clips.ts`（Deno）がTwitch Helix APIから定期的にクリップを取得し、Supabaseへ書き込む
-- 自動実行: `.github/workflows/sync-clips.yml` がGitHub Actionsで毎朝JST 6:05頃に同期バッチを実行（`workflow_dispatch`で手動実行も可）
+- クリップ同期: `sync-twitch-clips.ts`（Deno）がTwitch Helix APIから定期的にクリップを取得し、Supabaseへ書き込む。`refresh-clip-views.ts`は既存クリップのview_countだけを定期的に再取得する別スクリプト（詳細は後述）
+- 自動実行: `.github/workflows/sync-clips.yml`が毎朝JST 6:05頃に新規クリップ収集を実行、`.github/workflows/refresh-clip-views.yml`が毎時20分にview_count同期を実行（どちらも`workflow_dispatch`で手動実行可）
 
 ## ディレクトリ構成
 
@@ -80,6 +80,38 @@ Twitchクリップのランキング掲示板。いいね/よくないねの反�
   「期間で絞り込んだ一覧のうち先頭`limit`件（デフォルト50）」から計算しており、50件を超えて
   クリップを持つ配信者では過小表示される。`useClipperProfile`（`ClipperDetail.jsx`用）は
   `get_clipper_stats` RPCで正しく実装したので、配信者側を直す際はこちらを参考にすること。
+
+## トップページの週間ランキング・クリップごとの職人表示・view_count定期同期（2026-09-02追加）
+
+- トップページに直近7日間のクリップ職人ランキング（上位5人、`WeeklyClipperBoard`）を表示。
+  `get_top_clippers_by_period(period_start, period_end, limit)` RPCで期間を絞ってその場で集計する
+  （`top_clippers_mv`は全期間のみの事前集計のため、週間分は毎回ライブ集計。期間で絞られるので
+  `idx_clips_period_ranking`が効いて軽い）。`ClipRanking.jsx`側で7日間の範囲を`useMemo`で
+  マウント時に1度だけ固定している（毎レンダーで`new Date()`すると参照が変わり続けてuseEffectが
+  無限に再発火するため）。
+- `get_ranked_clips`の戻り値に`creator_id`/`creator_name`を追加。クリップ一覧の各行
+  （`ClipRanking.jsx`のClipRow、`ClipDetail.jsx`）にクリップ職人名を表示し、`/clippers/:creatorId`へ
+  リンクする。
+- クリップ職人の「総合n位」バッジは、表示中のクリップの作者id一覧をまとめて
+  `get_clipper_ranks(creator_ids, max_rank=100)` RPCに渡して取得する（`useClipperRanks`フック）。
+  101位以降・ランキング外は結果に含まれず、バッジは表示しない。`top_clippers_mv`に
+  `row_number() over (order by total_views desc) as rank`列を追加して実現している。
+- **view_countの定期同期**: `sync-twitch-clips.ts`の通常収集は「作成から24時間以内のクリップ」しか
+  見ないため、それより古いクリップのview_countは初回取得時のまま更新されず実際の値とズレていく。
+  `refresh-clip-views.ts`（新規スクリプト）が`clips.view_count_synced_at`が最も古いクリップから
+  順に、1回の実行につき最大`VIEW_SYNC_MAX_CLIPS`件（既定5000）をTwitch Get Clips（id指定）で
+  再取得し、`bulk_update_clip_views` RPCで更新する。オフセット無しで同じクエリを繰り返すだけで
+  自然にラウンドロビンする設計（更新するとview_count_synced_atが更新され、次回のクエリでは
+  「最も古い」側から外れる）。`.github/workflows/refresh-clip-views.yml`で毎時20分に自動実行
+  （sync-clips.ymlと同じSecretsを使う、追加設定不要）。
+  - Twitch側で見つからなかった（削除済み等の）クリップはview_countを上書きせず
+    `view_count_synced_at`だけ更新する（`bulk_update_clip_views`が`coalesce`で対応）。
+- **`refresh_ranking_views()`実行時の注意**: `REFRESH MATERIALIZED VIEW CONCURRENTLY`は
+  読み取りをブロックしない代わりに低速（本番実測で約19〜23秒、二つのビュー合計）。service_roleの
+  既定statement_timeoutは`authenticator`から継承する8秒程度（実測9秒でタイムアウト）で不足するため、
+  `alter role service_role set statement_timeout = '120s'`をマイグレーションで適用済み
+  （service_roleはバックエンド専用の鍵で一般公開されないため安全）。今後service_role経由で
+  重い処理を追加する際はこの制約を踏まえること。
 
 ## 認証
 

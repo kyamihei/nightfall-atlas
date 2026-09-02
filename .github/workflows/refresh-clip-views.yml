@@ -1,0 +1,41 @@
+# .github/workflows/refresh-clip-views.yml
+#
+# refresh-clip-views.ts を定期実行し、既存クリップのview_countを最新の値に近づけ続ける
+# ワークフロー。sync-clips.yml（日次、新規クリップの発見・収集が主目的）とは別に、
+# 「作成から24時間を超えた既存クリップのview_countが実際の値からズレていく」問題に対応する。
+#
+# 事前準備: sync-clips.ymlと同じSecretsを使う（追加設定は不要）
+#   TWITCH_CLIENT_ID / TWITCH_CLIENT_SECRET / SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY
+
+name: Refresh Clip View Counts
+
+on:
+  schedule:
+    - cron: "20 * * * *" # 毎時20分（sync-clips.ymlの6:05実行と重ならない時間）
+  workflow_dispatch:
+    inputs:
+      max_clips:
+        description: "1回の実行で同期する最大クリップ数"
+        required: false
+        default: "5000"
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      - name: Denoをセットアップ
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: view_count同期スクリプトを実行
+        env:
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+          TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          VIEW_SYNC_MAX_CLIPS: ${{ github.event.inputs.max_clips || '5000' }}
+        run: deno run --allow-net --allow-env refresh-clip-views.ts

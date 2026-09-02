@@ -312,12 +312,6 @@ $$ language plpgsql security definer;
 revoke execute on function refresh_ranking_views() from public;
 grant execute on function refresh_ranking_views() to service_role;
 
--- REFRESH MATERIALIZED VIEW CONCURRENTLYは読み取りをブロックしない代わりに低速（本番実測で約19秒）で、
--- service_roleの既定statement_timeout（authenticatorから継承する8秒程度、実測9秒でタイムアウト）を
--- 超えてしまう。service_roleはバックエンドの同期スクリプト専用の鍵（一般公開されない）なので、
--- このロールに限りタイムアウトを緩和する。
-alter role service_role set statement_timeout = '120s';
-
 -- backfill-clip-creators.ts 専用のバルク更新RPC。
 -- clips.title等はNOT NULL制約があり、PostgRESTのupsertはON CONFLICT DO UPDATEのみが実行される
 -- 場合でもINSERT側の候補行としてNOT NULL列の値を要求してしまうため使えない（実測済み）。
@@ -337,13 +331,10 @@ grant execute on function bulk_update_clip_creators(jsonb) to service_role;
 -- refresh-clip-views.ts 専用のバルク更新RPC（view_countの定期同期用）。
 -- bulk_update_clip_creatorsと同じ理由でupsertが使えないため、UPDATE ... FROM
 -- jsonb_to_recordset(...)で view_count / view_count_synced_at だけを更新する。
--- Twitch側で見つからなかった（削除済み等の）クリップはview_countにnullを渡す想定で、
--- その場合は既存値を維持しつつview_count_synced_atだけ更新する
--- （そうしないと毎回「最も同期が古いクリップ」として選ばれ続けてしまうため）。
 create or replace function bulk_update_clip_views(updates jsonb)
 returns void as $$
   update clips c
-  set view_count = coalesce(u.view_count, c.view_count), view_count_synced_at = now()
+  set view_count = u.view_count, view_count_synced_at = now()
   from jsonb_to_recordset(updates) as u(id text, view_count integer)
   where c.id = u.id;
 $$ language sql volatile security definer;

@@ -38,7 +38,7 @@ export default function ClipperDetail() {
   const { creatorId } = useParams();
   const [period, setPeriod] = useState("all"); // all | year | month | day
   const [selectedDay, setSelectedDay] = useState(() => new Date());
-  const { clips, creatorName, avatarUrl, totalViews, clipCount, loading, error } = useClipperProfile(
+  const { clips, creatorName, avatarUrl, totalViews, clipCount, rank, loading, error } = useClipperProfile(
     creatorId,
     50,
     period,
@@ -88,6 +88,7 @@ export default function ClipperDetail() {
               <h1 className="clip-title-font" style={styles.name}>
                 {creatorName || "不明なクリップ職人"}
               </h1>
+              {rank && <span style={styles.rankBadge}>総合{rank}位</span>}
               {creatorName && (
                 <a
                   href={`https://www.twitch.tv/${encodeURIComponent(creatorName)}`}
@@ -219,6 +220,14 @@ const styles = {
   },
   nameRow: { display: "flex", alignItems: "center", gap: 12 },
   name: { fontSize: 24, fontWeight: 600, margin: 0 },
+  rankBadge: {
+    fontSize: 11.5,
+    fontWeight: 600,
+    color: "#1C1417",
+    background: "#FFC857",
+    borderRadius: 12,
+    padding: "3px 10px",
+  },
   twitchLink: {
     display: "inline-flex",
     alignItems: "center",
