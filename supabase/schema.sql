@@ -495,10 +495,18 @@ grant execute on function bulk_update_clip_views(jsonb) to service_role;
 -- 人気配信者一覧（事前集計済みビューを読むだけなので高速）
 drop function if exists get_top_broadcasters(int);
 drop function if exists get_top_broadcasters(int, int);
-create or replace function get_top_broadcasters(broadcaster_limit int default 20, broadcaster_offset int default 0)
+-- search_queryは配信者名のあいまい検索用（省略時はnullで全件）。/broadcastersの検索ボックスが
+-- 「読み込み済みの1ページ分だけ」をフィルタしていて合計視聴回数下位の配信者を検索できなかった
+-- バグの修正で追加（詳細はmigrations/20260903080000_broadcaster_search.sql）。
+create or replace function get_top_broadcasters(
+  broadcaster_limit int default 20,
+  broadcaster_offset int default 0,
+  search_query text default null
+)
 returns table(streamer text, total_views bigint, clip_count bigint, tag text, profile_image_url text) as $$
   select streamer, total_views, clip_count, tag, profile_image_url
   from top_broadcasters_mv
+  where search_query is null or streamer ilike '%' || search_query || '%'
   order by total_views desc
   limit broadcaster_limit offset broadcaster_offset;
 $$ language sql stable;

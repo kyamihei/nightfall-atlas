@@ -726,27 +726,38 @@ export interface TopBroadcaster {
   profile_image_url: string | null;
 }
 
-/** 人気配信者一覧（合計視聴回数順、ページネーションつき）。所属グループタグは手動設定時のみ入る */
-export function useTopBroadcasters(limit = 20, offset = 0) {
+/**
+ * 人気配信者一覧（合計視聴回数順、ページネーションつき）。所属グループタグは手動設定時のみ入る。
+ * searchQueryを渡すとDB側（get_top_broadcastersのsearch_query引数）で配信者名のあいまい検索を行う
+ * （以前は「読み込み済みの1ページ分だけ」をクライアント側でフィルタしていたため、合計視聴回数が
+ * 現在のページより低い配信者を検索しても「見つからない」と誤表示される不具合があった）。
+ */
+export function useTopBroadcasters(limit = 20, offset = 0, searchQuery = "") {
   const [broadcasters, setBroadcasters] = useState<TopBroadcaster[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      setLoading(true);
-      const { data, error } = await supabase.rpc("get_top_broadcasters", {
-        broadcaster_limit: limit,
-        broadcaster_offset: offset,
-      });
-      if (cancelled) return;
-      if (!error) setBroadcasters(data ?? []);
-      setLoading(false);
-    })();
+    setLoading(true);
+    const timer = setTimeout(
+      async () => {
+        const trimmed = searchQuery.trim();
+        const { data, error } = await supabase.rpc("get_top_broadcasters", {
+          broadcaster_limit: limit,
+          broadcaster_offset: offset,
+          search_query: trimmed || null,
+        });
+        if (cancelled) return;
+        if (!error) setBroadcasters(data ?? []);
+        setLoading(false);
+      },
+      searchQuery.trim() ? 300 : 0, // 入力のたびに叩かないよう検索語がある時だけデバウンス
+    );
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
-  }, [limit, offset]);
+  }, [limit, offset, searchQuery]);
 
   return { broadcasters, loading };
 }

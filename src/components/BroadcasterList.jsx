@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { useTopBroadcasters } from "../lib/use-clip-ranking";
@@ -13,11 +13,11 @@ function formatViews(n) {
 export default function BroadcasterList() {
   const [page, setPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState("");
-  const { broadcasters, loading } = useTopBroadcasters(PAGE_SIZE, (page - 1) * PAGE_SIZE);
-
-  const visible = broadcasters.filter(
-    (b) => !searchQuery.trim() || b.streamer.toLowerCase().includes(searchQuery.trim().toLowerCase()),
-  );
+  // 検索語が変わったら1ページ目に戻す（違うページに検索語が引き継がれて空表示になるのを防ぐ）
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery]);
+  const { broadcasters, loading } = useTopBroadcasters(PAGE_SIZE, (page - 1) * PAGE_SIZE, searchQuery);
 
   return (
     <div style={styles.page}>
@@ -64,8 +64,8 @@ export default function BroadcasterList() {
       ) : (
         <>
           <div style={styles.list}>
-            {visible.length === 0 && <div style={styles.emptyState}>該当する配信者が見つかりませんでした。</div>}
-            {visible.map((b, i) => (
+            {broadcasters.length === 0 && <div style={styles.emptyState}>該当する配信者が見つかりませんでした。</div>}
+            {broadcasters.map((b, i) => (
               <Link
                 key={b.streamer}
                 className="cv-list-row cv-fade-in-up"
