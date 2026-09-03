@@ -908,17 +908,23 @@ export function useTrendingClips(limit = 5, lookbackHours = 72) {
 
 export interface ActivityFeedItem {
   id: string;
-  type: "comment" | "stamp" | "new_clip";
-  clipId: string;
-  clipTitle: string;
+  type: "comment" | "stamp" | "new_clip" | "hot_thread" | "rising_clipper";
+  clipId?: string;
+  clipTitle?: string;
   displayName?: string;
   stamp?: string;
   streamer?: string;
+  commentCount?: number;
+  creatorId?: string;
+  creatorName?: string;
   createdAt: string;
 }
 
 const ACTIVITY_FEED_EXCLUDED_CLIP_ID = "__general_thread__"; // 総合スレの番兵行は対象外にする
-const NEW_CLIP_REFRESH_INTERVAL_MS = 3 * 60 * 1000; // 新着クリップ枠の再取得間隔
+const PERIODIC_REFRESH_INTERVAL_MS = 3 * 60 * 1000; // 新着クリップ/盛り上がりスレ/急上昇クリッパー枠の再取得間隔
+const HOT_THREAD_LOOKBACK_MINUTES = 180; // この分数以内のコメントを対象に集計する
+const HOT_THREAD_MIN_COMMENTS = 2; // このコメント数以上ついていたら「盛り上がっている」とみなす
+const RISING_CLIPPER_LOOKBACK_HOURS = 24; // 「急上昇中」の集計対象期間
 
 /**
  * トップページに表示するライブ活動フィード（新着コメント・リアクションスタンプをリアルタイムで
@@ -934,6 +940,13 @@ const NEW_CLIP_REFRESH_INTERVAL_MS = 3 * 60 * 1000; // 新着クリップ枠の�
  * 空でも困らない予備枠として混ぜている。3分おきに再取得して、時間が経ってもフィードが
  * 枯れないようにする（新規クリップはRealtime購読ではなく定期取得: バルクupsertのたびに
  * 大量のINSERTイベントが一気に届くのを避けるため）。
+ *
+ * 「いま〇〇のスレが盛り上がっています」「急上昇中のクリップ職人」の2種類も同じ定期取得に混ぜている
+ * （2026-09-03追加）。どちらも「その時点の1位」を表すスナップショット枠なので、他の種類とは違い
+ * 毎回idを固定（`hot_thread-current`/`rising_clipper-current`）にして、取得のたびに古い分を
+ * 消してから最新のものだけを積み直す（該当が無ければその回は表示しない＝データを捏造しない）。
+ * 現状はコメント自体が少ないため「盛り上がっているスレ」はまだ滅多に出ない見込みだが、閾値
+ * （`HOT_THREAD_MIN_COMMENTS`件/`HOT_THREAD_LOOKBACK_MINUTES`分）を満たせばそのまま表示される。
  */
 export function useActivityFeed(limit = 15) {
   const [items, setItems] = useState<ActivityFeedItem[]>([]);
@@ -1019,16 +1032,30 @@ export function useActivityFeed(limit = 15) {
   useEffect(() => {
     let cancelled = false;
 
-    async function fetchRecentClips() {
-      const { data } = await supabase
-        .from("clips")
-        .select("id, title, streamer, created_at")
-        .neq("id", ACTIVITY_FEED_EXCLUDED_CLIP_ID)
-        .order("created_at", { ascending: false })
-        .limit(limit);
-      if (cancelled || !data) return;
+    async function fetchPeriodicItems() {
+      const risingPeriodEnd = new Date();
+      const risingPeriodStart = new Date(risingPeriodEnd.getTime() - RISING_CLIPPER_LOOKBACK_HOURS * 60 * 60 * 1000);
 
-      const newClipItems: ActivityFeedItem[] = data.map((c) => ({
+      const [{ data: recentClips }, { data: hotThreadRows }, { data: risingClipperRows }] = await Promise.all([
+        supabase
+          .from("clips")
+          .select("id, title, streamer, created_at")
+          .neq("id", ACTIVITY_FEED_EXCLUDED_CLIP_ID)
+          .order("created_at", { ascending: false })
+          .limit(limit),
+        supabase.rpc("get_hot_thread", {
+          lookback_minutes: HOT_THREAD_LOOKBACK_MINUTES,
+          min_comments: HOT_THREAD_MIN_COMMENTS,
+        }),
+        supabase.rpc("get_top_clippers_by_period", {
+          period_start: risingPeriodStart.toISOString(),
+          period_end: risingPeriodEnd.toISOString(),
+          clipper_limit: 1,
+        }),
+      ]);
+      if (cancelled) return;
+
+      const newClipItems: ActivityFeedItem[] = (recentClips ?? []).map((c) => ({
         id: `new_clip-${c.id}`,
         type: "new_clip",
         clipId: c.id as string,
@@ -1037,17 +1064,52 @@ export function useActivityFeed(limit = 15) {
         createdAt: c.created_at as string,
       }));
 
+      const hotThreadRow = hotThreadRows?.[0] as
+        | { clip_id: string; clip_title: string; comment_count: number }
+        | undefined;
+      const hotThreadItem: ActivityFeedItem | null = hotThreadRow
+        ? {
+            id: "hot_thread-current",
+            type: "hot_thread",
+            clipId: hotThreadRow.clip_id,
+            clipTitle: hotThreadRow.clip_title,
+            commentCount: hotThreadRow.comment_count,
+            createdAt: new Date().toISOString(),
+          }
+        : null;
+
+      const risingClipperRow = risingClipperRows?.[0] as
+        | { creator_id: string; creator_name: string }
+        | undefined;
+      const risingClipperItem: ActivityFeedItem | null = risingClipperRow
+        ? {
+            id: "rising_clipper-current",
+            type: "rising_clipper",
+            creatorId: risingClipperRow.creator_id,
+            creatorName: risingClipperRow.creator_name,
+            createdAt: new Date().toISOString(),
+          }
+        : null;
+
       setItems((prev) => {
-        const existingIds = new Set(prev.map((i) => i.id));
-        const merged = [...prev, ...newClipItems.filter((i) => !existingIds.has(i.id))];
+        // hot_thread/rising_clipperは「その時点の1位」を表すスナップショットなので、
+        // 他の種類のように積み上げず、毎回古い分を消してから最新のものだけ積み直す
+        const withoutSnapshots = prev.filter((i) => i.type !== "hot_thread" && i.type !== "rising_clipper");
+        const existingIds = new Set(withoutSnapshots.map((i) => i.id));
+        const merged = [
+          ...withoutSnapshots,
+          ...newClipItems.filter((i) => !existingIds.has(i.id)),
+          ...(hotThreadItem ? [hotThreadItem] : []),
+          ...(risingClipperItem ? [risingClipperItem] : []),
+        ];
         return merged
           .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
           .slice(0, limit);
       });
     }
 
-    fetchRecentClips();
-    const timer = setInterval(fetchRecentClips, NEW_CLIP_REFRESH_INTERVAL_MS);
+    fetchPeriodicItems();
+    const timer = setInterval(fetchPeriodicItems, PERIODIC_REFRESH_INTERVAL_MS);
     return () => {
       cancelled = true;
       clearInterval(timer);

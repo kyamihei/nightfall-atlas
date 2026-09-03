@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, Users, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, Smile, Calendar, Play } from "lucide-react";
+import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, Users, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, Smile, Calendar, Play, Flame } from "lucide-react";
 import {
   useClips,
   useReactions,
@@ -517,14 +517,18 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
  */
 function ActivityTicker({ items }) {
   const [index, setIndex] = useState(0);
-  const prevLengthRef = useRef(0);
+  const topIdRef = useRef(null);
 
   useEffect(() => {
-    if (items.length > prevLengthRef.current) {
-      setIndex(0); // 新着が来た瞬間はそれを見せる
+    // 件数が上限に達した後は配列の長さが変わらなくなる（hot_thread/rising_clipperのような
+    // スナップショット枠の更新も、件数を増やさず中身だけ入れ替わる）ため、長さではなく
+    // 「先頭要素のid」の変化で新着判定する
+    const topId = items[0]?.id ?? null;
+    if (topId !== null && topId !== topIdRef.current) {
+      setIndex(0); // 新着・更新が来た瞬間はそれを見せる
     }
-    prevLengthRef.current = items.length;
-  }, [items.length]);
+    topIdRef.current = topId;
+  }, [items]);
 
   useEffect(() => {
     if (items.length <= 1) return;
@@ -536,9 +540,10 @@ function ActivityTicker({ items }) {
 
   if (items.length === 0) return null;
   const item = items[index % items.length];
+  const linkTo = item.type === "rising_clipper" ? `/clippers/${encodeURIComponent(item.creatorId)}` : `/clips/${item.clipId}`;
 
   return (
-    <Link key={item.id} to={`/clips/${item.clipId}`} className="cv-fade-in" style={styles.activityTicker}>
+    <Link key={item.id} to={linkTo} className="cv-fade-in" style={styles.activityTicker}>
       <span className="cv-live-dot" style={styles.activityDot} />
       <span style={styles.activityText}>
         {item.type === "comment" && (
@@ -557,6 +562,18 @@ function ActivityTicker({ items }) {
           <>
             <Film size={13} style={{ marginRight: 4, verticalAlign: -2 }} />
             「{item.clipTitle}」（{item.streamer}）をクリップに追加しました
+          </>
+        )}
+        {item.type === "hot_thread" && (
+          <>
+            <Flame size={13} style={{ marginRight: 4, verticalAlign: -2 }} color="#FF9F45" />
+            いま「{item.clipTitle}」のスレが盛り上がっています！（コメント{item.commentCount}件）
+          </>
+        )}
+        {item.type === "rising_clipper" && (
+          <>
+            <TrendingUp size={13} style={{ marginRight: 4, verticalAlign: -2 }} color="#5DCAA5" />
+            急上昇中のクリップ職人：<strong style={{ color: "#EDEDF2" }}>{item.creatorName}</strong>さん
           </>
         )}
       </span>
