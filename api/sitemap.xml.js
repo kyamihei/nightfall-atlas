@@ -22,11 +22,13 @@ function urlEntry(loc, lastmod) {
 }
 
 export default async function handler(req, res) {
-  const [broadcasters, clippers, clips] = await Promise.all([
-    supabaseGet(`tracked_broadcasters?select=broadcaster_name&order=last_seen_at.desc&limit=5000`),
-    supabaseGet(`top_clippers_mv?select=creator_id&order=total_views.desc&limit=3000`),
-    supabaseGet(`clips?id=neq.__general_thread__&select=id,twitch_created_at&order=view_count.desc&limit=5000`),
-  ]);
+  // 3件同時にPromise.allで並列fetchすると本番で2件がnullで返る現象を確認したため
+  // （原因未特定、Vercel Functions環境からの複数同時fetchに関する何らかの制約の可能性）、
+  // 順次実行にして確実性を優先する（sitemapは長時間キャッシュするため数百ms〜数秒の
+  // 差は問題にならない）。
+  const broadcasters = await supabaseGet(`tracked_broadcasters?select=broadcaster_name&order=last_seen_at.desc&limit=5000`);
+  const clippers = await supabaseGet(`top_clippers_mv?select=creator_id&order=total_views.desc&limit=3000`);
+  const clips = await supabaseGet(`clips?id=neq.__general_thread__&select=id,twitch_created_at&order=view_count.desc&limit=5000`);
 
   const entries = [
     ...STATIC_PATHS.map((p) => urlEntry(`https://kurisure.jp${p}`)),
