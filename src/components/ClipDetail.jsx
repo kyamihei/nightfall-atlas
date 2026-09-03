@@ -14,7 +14,9 @@ import {
   REACTION_STAMPS,
 } from "../lib/use-clip-ranking";
 import { REACTIONS_ENABLED } from "../lib/feature-flags";
+import { useDocumentMeta } from "../lib/use-document-meta";
 import Footer from "./Footer";
+import ShareButtons from "./ShareButtons";
 
 function formatViews(n) {
   return new Intl.NumberFormat("ja-JP").format(n);
@@ -60,6 +62,15 @@ export default function ClipDetail() {
   const clipperRanks = useClipperRanks(clip ? [clip.creator_id] : []);
   const { comments, submit, submitting, error: commentError } = useComments(id);
   const { report: reportComment } = useCommentReport();
+
+  useDocumentMeta({
+    title: clip ? `${clip.title} - ${clip.streamer} | クリスレ` : null,
+    description: clip
+      ? `${clip.streamer}のクリップ「${clip.title}」・${formatViews(clip.view_count)}回視聴${clip.creator_name ? `・クリップ職人: ${clip.creator_name}` : ""}`
+      : null,
+    image: clip?.thumbnail_url,
+    path: clip ? `/clips/${clip.id}` : null,
+  });
 
   const [nameDraft, setNameDraft] = useState("");
   const [draft, setDraft] = useState("");
@@ -210,6 +221,13 @@ export default function ClipDetail() {
           <MessageSquare size={14} />
           総合スレで話す
         </Link>
+      </div>
+
+      <div style={{ marginBottom: 14 }}>
+        <ShareButtons
+          url={`https://kurisure.jp/clips/${clip.id}`}
+          text={`${clip.title} - ${clip.streamer}｜クリスレ`}
+        />
       </div>
 
       <div style={styles.stampRow}>

@@ -2,7 +2,9 @@ import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, Loader2, X, Plus, MessageSquare } from "lucide-react";
 import { useBroadcasterProfile, useBroadcasterTags } from "../lib/use-clip-ranking";
+import { useDocumentMeta } from "../lib/use-document-meta";
 import Footer from "./Footer";
+import ShareButtons from "./ShareButtons";
 
 const PERIOD_TABS = [
   { value: "all", label: "全期間" },
@@ -48,6 +50,15 @@ export default function BroadcasterDetail() {
   );
   const { tags: myTags, addTag, removeTag } = useBroadcasterTags(streamer);
   const [tagDraft, setTagDraft] = useState("");
+
+  useDocumentMeta({
+    title: !loading ? `${streamer}のクリップ一覧 | クリスレ` : null,
+    description: !loading
+      ? `${streamer}のTwitchクリップをランキングでチェック。合計${formatViews(totalViews)}回視聴・クリップ${clipCount}件。`
+      : null,
+    image: avatarUrl,
+    path: `/broadcasters/${encodeURIComponent(streamer)}`,
+  });
 
   function handleAddTag() {
     const trimmed = tagDraft.trim();
@@ -105,6 +116,12 @@ export default function BroadcasterDetail() {
               合計 {formatViews(totalViews)}回視聴 ・ クリップ{clipCount}件
             </p>
           </div>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <ShareButtons
+            url={`https://kurisure.jp/broadcasters/${encodeURIComponent(streamer)}`}
+            text={`${streamer}のクリップ一覧｜クリスレ`}
+          />
         </div>
       </header>
 

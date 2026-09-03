@@ -2,7 +2,9 @@ import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, Loader2, ExternalLink } from "lucide-react";
 import { useClipperProfile } from "../lib/use-clip-ranking";
+import { useDocumentMeta } from "../lib/use-document-meta";
 import Footer from "./Footer";
+import ShareButtons from "./ShareButtons";
 
 const PERIOD_TABS = [
   { value: "all", label: "全期間" },
@@ -45,6 +47,16 @@ export default function ClipperDetail() {
     period,
     period === "day" ? selectedDay : undefined,
   );
+
+  useDocumentMeta({
+    title: !loading && creatorName ? `${creatorName}のクリップ一覧 | クリスレ` : null,
+    description:
+      !loading && creatorName
+        ? `クリップ職人${creatorName}${rank ? `（総合${rank}位）` : ""}が作ったクリップ一覧。合計${formatViews(totalViews)}回視聴・クリップ${clipCount}件。`
+        : null,
+    image: avatarUrl,
+    path: `/clippers/${encodeURIComponent(creatorId)}`,
+  });
 
   if (loading) {
     return (
@@ -107,6 +119,12 @@ export default function ClipperDetail() {
               合計 {formatViews(totalViews)}回視聴 ・ クリップ{clipCount}件
             </p>
           </div>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <ShareButtons
+            url={`https://kurisure.jp/clippers/${encodeURIComponent(creatorId)}`}
+            text={`${creatorName || "クリップ職人"}のクリップ一覧｜クリスレ`}
+          />
         </div>
       </header>
 
