@@ -36,6 +36,6 @@
       "has": [{ "type": "header", "key": "user-agent", "value": "(bot|Bot|facebookexternalhit|Twitterbot|Slackbot|TelegramBot|Discordbot|WhatsApp|LINE|Pinterest|redditbot|Applebot)" }],
       "destination": "/api/og/clipper/:id"
     },
-    { "source": "/((?!.*\\..*).*)", "destination": "/index.html" }
+    { "source": "/((?!api/|.*\\..*).*)", "destination": "/index.html" }
   ]
 }
