@@ -290,6 +290,33 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   既存パターンに倣って`lucide-react`のアイコンを使うこと**（スタンプ名自体の文字列「すっご」等は
   絵文字ではなくテキストなので対象外）。
 
+## 独自ドメイン移行（kurisure.jp）・ファビコン刷新・基本SEO対応（2026-09-03追加）
+
+- 独自ドメイン`https://kurisure.jp`をVercelプロジェクト（`clip-vote`）に追加し、稼働確認済み
+  （お名前.comでドメイン取得 → Aレコード`kurisure.jp → 76.76.21.21`を設定 →
+  「DNSレコード設定を利用する」用の専用ネームサーバー`01〜04.dnsv.jp`へ切替、という2段階の設定が
+  必要だった。お名前.comは「DNSレコード設定」と「ネームサーバー設定」が別画面で、後者を
+  変更しないと前者の設定が外部に反映されない点がハマりどころ）。
+  - **未対応（次のステップ）**: `post-comment`/`request-broadcaster`/`submit-contact`の3つの
+    Edge FunctionsのCORS許可オリジン（`ALLOWED_ORIGIN`シークレット）は、まだ旧ドメイン
+    `https://clip-vote.vercel.app`固定のまま。新ドメイン`https://kurisure.jp`でもコメント投稿等が
+    動くようにするには、単純な文字列比較ではなく複数オリジン対応（リクエストの`Origin`ヘッダーを
+    許可リストと照合して該当オリジンだけを返す方式）へのコード変更＋Supabase側シークレット更新が
+    必要（ユーザーとは「両ドメインとも動作させる」方針で合意済み、DNS反映待ちで着手を保留していた）。
+- ファビコンをテンプレート由来の汎用SVG（クリスレのブランドと無関係な紫の抽象アイコン）から、
+  新規に作成した`favicon.ico`（64×64）に差し替え。トップページの「クリスレ」見出しの隣にも
+  同じ画像を表示している（`ClipRanking.jsx`の`styles.h1Icon`）。
+- 「クリスレ」見出しのフォントをOswald（欧文専用、日本語部分は実際にはフォールバックしていた）から
+  日本語対応の「RocknRoll One」に変更（`theme.css`のGoogle Fonts `@import`に追加）。
+- **基本的なSEO対応**を追加（`index.html`）: `<html lang="en">`→`lang="ja"`に修正、
+  meta description・OGP（`og:*`）・Twitter Cardタグ、`canonical`を`https://kurisure.jp/`で追加。
+  `public/robots.txt`・`public/sitemap.xml`も新規追加（sitemapは静的ページのみ）。
+  - **未対応（次のステップ候補）**: クリップ/配信者/クリップ職人の個別ページ
+    （`/clips/:id`等）はSPAのため`index.html`の固定`<title>`/metaしか出せておらず、
+    sitemap.xmlにも含めていない。動的にmetaを差し替える対応（react-helmet-async等）と、
+    ビルド時にSupabaseから全クリップ/配信者IDを取得してsitemapへ含める仕組みは、
+    より大きな作業になるため今回は見送った。
+
 ## トップページのランキング/トレンド タブ統合・期間指定のボタン化（2026-09-03追加）
 
 - トップページ上部に別ウィジェットとして表示していた「いまトレンド」（`TrendingBoard`）を廃止し、
