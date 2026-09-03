@@ -297,12 +297,14 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   「DNSレコード設定を利用する」用の専用ネームサーバー`01〜04.dnsv.jp`へ切替、という2段階の設定が
   必要だった。お名前.comは「DNSレコード設定」と「ネームサーバー設定」が別画面で、後者を
   変更しないと前者の設定が外部に反映されない点がハマりどころ）。
-  - **未対応（次のステップ）**: `post-comment`/`request-broadcaster`/`submit-contact`の3つの
-    Edge FunctionsのCORS許可オリジン（`ALLOWED_ORIGIN`シークレット）は、まだ旧ドメイン
-    `https://clip-vote.vercel.app`固定のまま。新ドメイン`https://kurisure.jp`でもコメント投稿等が
-    動くようにするには、単純な文字列比較ではなく複数オリジン対応（リクエストの`Origin`ヘッダーを
-    許可リストと照合して該当オリジンだけを返す方式）へのコード変更＋Supabase側シークレット更新が
-    必要（ユーザーとは「両ドメインとも動作させる」方針で合意済み、DNS反映待ちで着手を保留していた）。
+  - `post-comment`/`request-broadcaster`/`submit-contact`の3つのEdge FunctionsのCORS許可オリジン
+    （`ALLOWED_ORIGIN`シークレット）は、当初「新旧両ドメインとも動かす」方針で複数オリジン対応の
+    コード変更を検討していたが、ユーザーの意向で**旧ドメイン（`https://clip-vote.vercel.app`）は
+    もう使わない**ことになったため、単純に`ALLOWED_ORIGIN`の値を`https://kurisure.jp`へ
+    上書きするだけで対応した（コード変更は不要、`npx supabase secrets set`のみ）。
+    Supabase Edge Functionsのシークレットはランタイムで注入されるため、値を更新しただけで
+    再デプロイなしに即座に反映される（curlでのCORSプリフライト確認で実測済み）。
+    旧ドメインからのリクエストはCORSで弾かれる状態になっている（意図した動作）。
 - ファビコンをテンプレート由来の汎用SVG（クリスレのブランドと無関係な紫の抽象アイコン）から、
   新規に作成した`favicon.ico`（64×64）に差し替え。トップページの「クリスレ」見出しの隣にも
   同じ画像を表示している（`ClipRanking.jsx`の`styles.h1Icon`）。
@@ -404,7 +406,8 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
 ## ローカル開発時の既知の制約
 
 - 全Edge Function（`post-comment` / `request-broadcaster` / `submit-contact`）共通で、CORS許可オリジン
-  （`ALLOWED_ORIGIN`シークレット）が本番ドメイン（`https://clip-vote.vercel.app`）に固定されているため、
+  （`ALLOWED_ORIGIN`シークレット）が本番ドメイン（`https://kurisure.jp`、2026-09-03に独自ドメイン
+  移行に伴い旧`https://clip-vote.vercel.app`から変更）に固定されているため、
   `npm run dev`（localhost）からの呼び出しはブラウザのCORSで必ずブロックされる
   （2026-09-02/03で複数回確認済み、私の変更が原因ではない。新しいEdge Functionを追加した場合も
   同様に発生する前提で考えること）。Edge Function自体の動作確認はcurl（CORSの影響を受けない）で行うこと。
