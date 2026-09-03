@@ -11,12 +11,18 @@
 # （`supabase/migrations/20260903140000_reliable_cron_via_pg_cron.sql`の
 # `trigger-sync-live-clips`ジョブ）。workflow_dispatchはpg_cronからの起動と手動実行を兼ねる。
 #
+# 【2026-09-03追記】日次discoveryだけだと最大24時間・1日1回のスナップショット判定のため
+# 見つからないままの配信者が出る問題（実際に加藤純一のサブチャンネル等の人気クリップが
+# 欠落する実害が発生、詳細はCLAUDE.md）への対応で、配信者の新規発見もこちらで行うようにした。
+# そのためTARGET_GAME_IDSも必要になった。
+#
 # 事前準備:
-#   sync-clips.ymlと同じSecretsを使うため追加設定は不要（TARGET_GAME_IDSは使わない）。
+#   sync-clips.ymlと同じSecretsを使うため追加設定は不要。
 #     TWITCH_CLIENT_ID
 #     TWITCH_CLIENT_SECRET
 #     SUPABASE_URL
 #     SUPABASE_SERVICE_ROLE_KEY
+#     TARGET_GAME_IDS
 
 name: Sync Live Twitch Clips
 
@@ -41,4 +47,5 @@ jobs:
           TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TARGET_GAME_IDS: ${{ secrets.TARGET_GAME_IDS }}
         run: deno run --allow-net --allow-env sync-live-clips.ts

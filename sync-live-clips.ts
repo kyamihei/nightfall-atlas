@@ -6,11 +6,20 @@
 // 対象数を大きく減らし、日次フル同期より遥かに高い頻度で回してもTwitch APIコール数・
 // 実行時間を抑えられる（2026-09-03、「最新クリップの反映が遅い」という要望への対応で追加）。
 //
-// 配信者の新規発見・過去分バックフィル・配信者/クリッパーランキング集計ビューの更新は
-// 引き続きsync-twitch-clips.ts（日次）の役割のまま。このスクリプトはclipsテーブルへの
-// 新規クリップ反映だけを担当する（get_ranked_clips/get_trending_clipsはclipsテーブルを
-// 直接ライブ集計するRPCのため、ここでupsertした時点から即座にランキング/トレンドへ反映される。
-// 集計ビュー経由の配信者/クリッパーランキングだけは引き続き日次更新のまま多少遅れる）。
+// 過去分バックフィル・配信者/クリッパーランキング集計ビューの更新は引き続き
+// sync-twitch-clips.ts（日次）の役割のまま。ただし**配信者の新規発見だけはこちらでも行う**
+// （2026-09-03追記）: 日次discoveryだけだと「その日の発見タイミングでライブ中でなかった配信者」
+// （大手配信者のサブチャンネル等）が最大24時間、しかも1日1回のスナップショット判定のため
+// 実質さらに長く見つからないままになり、実際に競合サイトには載っている人気クリップが
+// 数時間〜半日単位で欠落する実害が発生した。discovery自体はGet Streamsを数回呼ぶだけの
+// 軽い処理（重いのは新規配信者ごとの過去分クリップ全件バックフィルの方で、そちらは
+// 引き続き日次のまま）なので、15分おきのこちらに含めても負荷は小さい。新規発見した配信者は
+// 発見と同時に「いまライブ中」と確定しているため、このスクリプトの本来の役目である
+// 直近クリップ取得の対象にもそのまま含める（＝発見から最短15分でクリップが載るようになる）。
+//
+// get_ranked_clips/get_trending_clipsはclipsテーブルを直接ライブ集計するRPCのため、
+// ここでupsertした時点から即座にランキング/トレンドへ反映される。集計ビュー経由の
+// 配信者/クリッパーランキングだけは引き続き日次更新のまま多少遅れる。
 //
 // 実行例: deno run --allow-net --allow-env sync-live-clips.ts
 //
@@ -19,6 +28,7 @@
 //   TWITCH_CLIENT_SECRET
 //   SUPABASE_URL
 //   SUPABASE_SERVICE_ROLE_KEY
+//   TARGET_GAME_IDS   カンマ区切りのTwitchゲームID一覧（sync-twitch-clips.tsと同じもの）
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -26,6 +36,10 @@ const TWITCH_CLIENT_ID = Deno.env.get("TWITCH_CLIENT_ID")!;
 const TWITCH_CLIENT_SECRET = Deno.env.get("TWITCH_CLIENT_SECRET")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const TARGET_GAME_IDS = (Deno.env.get("TARGET_GAME_IDS") ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 const BROADCASTER_STALE_DAYS = 30; // sync-twitch-clips.tsと同じ「追跡対象」の定義に揃える
 const HELIX_STREAMS_ID_BATCH = 100; // Get Streamsはuser_idを1リクエスト最大100個まで指定できる
@@ -35,6 +49,13 @@ const HELIX_CLIPS_PAGE_SIZE = 20; // 15分程度の短い窓で1配信者が20�
 const CLIP_LOOKBACK_MINUTES = 30;
 const RATE_LIMIT_RETRY_MAX = 3;
 const RATE_LIMIT_DEFAULT_WAIT_MS = 10_000;
+// discoveryは15分おきに毎回呼ぶため、日次版（sync-twitch-clips.ts、TOP_JA_STREAMS_LIMIT=400）より
+// 控えめにしてAPI呼び出し数を抑える。人気上位を優先的に・素早く拾えれば十分という判断
+// （ニッチな配信者の発見は引き続き日次のフル発見に任せる）。
+const TOP_JA_STREAMS_LIMIT = 100;
+const HELIX_STREAMS_PAGE_SIZE = 100;
+const STREAMS_PER_GAME = 100; // 1カテゴリあたり発見する配信の上限（Helixの最大値、sync-twitch-clips.tsと同じ）
+const HELIX_USERS_PAGE_SIZE = 100;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -130,6 +151,83 @@ interface TwitchClip {
   created_at: string;
 }
 
+interface TwitchStream {
+  user_id: string;
+  user_name: string;
+  game_id: string;
+  language: string;
+}
+
+/** 対象ゲームを日本語配信中の配信者を発見する（sync-twitch-clips.tsと同じロジック） */
+async function discoverJapaneseBroadcasters(token: string, gameId: string): Promise<TwitchStream[]> {
+  const url = new URL("https://api.twitch.tv/helix/streams");
+  url.searchParams.set("game_id", gameId);
+  url.searchParams.set("language", "ja");
+  url.searchParams.set("first", String(STREAMS_PER_GAME));
+
+  const res = await fetchWithRetry(url, token);
+  if (!res || !res.ok) {
+    console.error(`game_id=${gameId} の配信者発見に失敗: ${res?.status}`);
+    return [];
+  }
+  const data = await res.json();
+  return data.data as TwitchStream[];
+}
+
+/**
+ * ゲームカテゴリを問わず、日本語配信の視聴者数上位を発見する（sync-twitch-clips.tsと同じロジック、
+ * 上限だけ控えめ）。釈迦・加藤純一のように特定ゲームに縛られない大手配信者・サブチャンネルは
+ * カテゴリ別発見だけでは拾えないため必要。
+ */
+async function discoverTopJapaneseBroadcasters(token: string): Promise<TwitchStream[]> {
+  const results: TwitchStream[] = [];
+  let cursor: string | undefined;
+
+  while (results.length < TOP_JA_STREAMS_LIMIT) {
+    const url = new URL("https://api.twitch.tv/helix/streams");
+    url.searchParams.set("language", "ja");
+    url.searchParams.set("first", String(HELIX_STREAMS_PAGE_SIZE));
+    if (cursor) url.searchParams.set("after", cursor);
+
+    const res = await fetchWithRetry(url, token);
+    if (!res || !res.ok) {
+      console.error(`日本語配信 人気順の発見に失敗: ${res?.status}`);
+      break;
+    }
+    const data = await res.json();
+    const page = data.data as TwitchStream[];
+    results.push(...page);
+
+    cursor = data.pagination?.cursor;
+    if (!cursor || page.length === 0) break;
+  }
+
+  return results.slice(0, TOP_JA_STREAMS_LIMIT);
+}
+
+async function fetchProfileImages(token: string, userIds: string[]): Promise<Map<string, string>> {
+  const uniqueIds = [...new Set(userIds)].filter(Boolean);
+  const map = new Map<string, string>();
+  if (uniqueIds.length === 0) return map;
+
+  for (let i = 0; i < uniqueIds.length; i += HELIX_USERS_PAGE_SIZE) {
+    const chunk = uniqueIds.slice(i, i + HELIX_USERS_PAGE_SIZE);
+    const url = new URL("https://api.twitch.tv/helix/users");
+    chunk.forEach((id) => url.searchParams.append("id", id));
+
+    const res = await fetchWithRetry(url, token);
+    if (!res || !res.ok) {
+      console.error(`プロフィール画像の取得に失敗しました（${chunk.length}件分）: ${res?.status}`);
+      continue;
+    }
+    const data = await res.json();
+    for (const u of data.data as { id: string; profile_image_url: string }[]) {
+      map.set(u.id, u.profile_image_url);
+    }
+  }
+  return map;
+}
+
 /** 追跡中の配信者idのうち、いま実際にライブ配信中の人だけを返す（Get Streamsは指定id中の"ライブ中"のものだけ返す）。 */
 async function fetchLiveBroadcasterIds(token: string, broadcasterIds: string[]): Promise<string[]> {
   const liveIds: string[] = [];
@@ -199,6 +297,35 @@ async function main() {
   const token = await getAppAccessToken();
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
+  // 0. 配信者の新規発見（日次のsync-twitch-clips.tsだけに頼ると、発見が最大24時間・
+  //    しかも1日1回のスナップショット判定になり見つからないままの配信者が出る問題への対応、
+  //    詳細はファイル冒頭のコメント参照）。TARGET_GAME_IDS未設定でも本来の役目
+  //    （追跡中配信者のクリップ取得）は継続できるよう、失敗時は警告のみで先へ進む。
+  const discovered = new Map<string, string>(); // id -> name
+  if (TARGET_GAME_IDS.length === 0) {
+    console.warn("TARGET_GAME_IDSが未設定のため、このスクリプトでの配信者新規発見はスキップします。");
+  } else {
+    for (const gameId of TARGET_GAME_IDS) {
+      const streams = await discoverJapaneseBroadcasters(token, gameId);
+      for (const s of streams) discovered.set(s.user_id, s.user_name);
+    }
+    const topJaStreams = await discoverTopJapaneseBroadcasters(token);
+    for (const s of topJaStreams) discovered.set(s.user_id, s.user_name);
+    console.log(`新たに発見した配信者数: ${discovered.size}（うち人気順発見: ${topJaStreams.length}）`);
+
+    if (discovered.size > 0) {
+      const avatars = await fetchProfileImages(token, [...discovered.keys()]);
+      const rows = [...discovered.entries()].map(([broadcaster_id, broadcaster_name]) => ({
+        broadcaster_id,
+        broadcaster_name,
+        last_seen_at: new Date().toISOString(),
+        profile_image_url: avatars.get(broadcaster_id) ?? null,
+      }));
+      const { error } = await supabase.from("tracked_broadcasters").upsert(rows, { onConflict: "broadcaster_id" });
+      if (error) console.error("tracked_broadcastersのupsertに失敗:", error.message);
+    }
+  }
+
   const staleBefore = new Date(Date.now() - BROADCASTER_STALE_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const activeBroadcasters = await fetchAllRows(supabase, "tracked_broadcasters", (q) =>
     q.select("broadcaster_id").gte("last_seen_at", staleBefore),
@@ -213,8 +340,14 @@ async function main() {
   }
 
   const broadcasterIds = activeBroadcasters.map((b) => b.broadcaster_id as string);
-  const liveBroadcasterIds = await fetchLiveBroadcasterIds(token, broadcasterIds);
-  console.log(`追跡中の配信者${broadcasterIds.length}人中、いまライブ中: ${liveBroadcasterIds.length}人`);
+  const liveFromTracked = await fetchLiveBroadcasterIds(token, broadcasterIds);
+  // discoveryで見つかった配信者はGet Streamsで確認済み＝その時点でライブ中確定のため、
+  // 追跡中リストとは別にfetchLiveBroadcasterIdsを呼び直さずそのままマージできる
+  // （見つかってから数秒〜十数秒のズレはあるが、配信を止めていれば後段のGet Clipsが単に0件を返すだけで実害はない）。
+  const liveBroadcasterIds = [...new Set([...liveFromTracked, ...discovered.keys()])];
+  console.log(
+    `追跡中の配信者${broadcasterIds.length}人中、いまライブ中: ${liveFromTracked.length}人（新規発見分${discovered.size}人を含め計${liveBroadcasterIds.length}人を対象にします）`,
+  );
 
   if (liveBroadcasterIds.length === 0) {
     console.log("いまライブ中の追跡配信者がいないため、クリップ取得はスキップします。");
