@@ -1,0 +1,46 @@
+# .github/workflows/post-daily-ranking.yml
+#
+# post-daily-ranking.ts を実行し、前日（JST 0:00〜24:00）に一番視聴されたクリップを
+# 問いかけ型の文面でXへ自動投稿するワークフロー（2026-09-03追加）。
+#
+# 【重要】GitHub Actions自体の`schedule`トリガーは実測で信頼できないことが判明しているため
+# （詳細はCLAUDE.md「GitHub Actionsのscheduleトリガーが信頼できない問題」参照）、
+# scheduleトリガーはあえて設定していない。代わりにSupabase側のpg_cron（DBレベルのスケジューラ）
+# が毎日UTC 0:00（JST 9:00）にこのworkflowのdispatches APIをWebhookで叩く方式にした
+# （`supabase/migrations/20260903170000_daily_ranking_tweet.sql`の
+# `trigger-post-daily-ranking`ジョブ）。workflow_dispatchはpg_cronからの起動と手動実行を兼ねる。
+#
+# 事前準備:
+#   SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEYはsync-clips.ymlと共通（追加設定不要）。
+#   以下はX Developer PortalでApp（権限: Read and Write）を作成し、新規にSecrets登録が必要:
+#     X_API_KEY
+#     X_API_KEY_SECRET
+#     X_ACCESS_TOKEN
+#     X_ACCESS_TOKEN_SECRET
+
+name: Post Daily Ranking to X
+
+on:
+  workflow_dispatch: {} # pg_cronからのAPI起動、およびActionsタブからの手動実行用
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      - name: Denoをセットアップ
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: 日次ランキング投稿スクリプトを実行
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_KEY_SECRET: ${{ secrets.X_API_KEY_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+        run: deno run --allow-net --allow-env post-daily-ranking.ts

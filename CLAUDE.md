@@ -748,6 +748,39 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   手早い）。「0件」という結果が返ってきても、それが「本当に無い」のか「クエリ自体が壊れている」
   のか、疑ってから結論を出すこと。
 
+## 毎日のランキングをXへ自動投稿（2026-09-03追加）
+
+- 「訪問者数を増やしたい」という相談の一環で、前日（0時〜24時）に一番視聴されたクリップを
+  「問いかけ型」の文面（「一番見られたのは誰だったと思う？→正解は…」）で毎朝JST 9:00に
+  自動投稿する機能を追加した。クリップ個別ページには当日実装済みの動的OGP
+  （`api/og/clip/[id].js`）が効くため、リンクを貼るだけでXのタイムライン上にサムネイル付きの
+  カードが表示される（この日のうちに実装したOGP機能とシナジーがある設計）。
+- `post-daily-ranking.ts`（新規Denoスクリプト）が実処理を担当。他の定期ジョブと同じく
+  GitHub Actions自身の`schedule`トリガーは信頼できないため使わず、Supabase側のpg_cron
+  （`trigger-post-daily-ranking`、UTC 0:00=JST 9:00）から`.github/workflows/
+  post-daily-ranking.yml`のworkflow_dispatchをWebhookで確実に起動する、既存3ジョブと同じ方式。
+- **X API v2への投稿はOAuth 1.0a（ユーザーコンテキスト）認証が必要**で、外部ライブラリに
+  頼らずWeb Crypto API（HMAC-SHA1）で自前署名している（このプロジェクトの「スクリプトは
+  自己完結させる」方針を踏襲）。必要な4値（API Key/Secret、Access Token/Secret）は
+  X Developer PortalでAppを作成し、**権限を「Read and Write」に変更してから**
+  「Keys and tokens」で発行する（先に生成していた場合はRead and Write化後に再生成が必要）。
+  - **これら4値はSupabase Vaultではなく、GitHub Actionsのリポジトリシークレットとして
+    登録する**（`gh secret set X_API_KEY`等、または GitHub の Settings → Secrets and
+    variables → Actions）。Vaultに置くパターン（`github_actions_pat`/`admin_panel_password`）は
+    「SQL/pg_cronから直接参照する必要がある」秘密情報向けで、X APIキーはpost-daily-ranking.ts
+    （GitHub Actionsランナー内で完結するDenoスクリプト）でしか使わないため、
+    既存のTWITCH_CLIENT_ID等と同じ「GitHub Actions Secrets」パターンが適切。
+- 二重投稿防止のため`daily_ranking_posts`テーブル（`posted_date`が主キー）に投稿済みの日付を
+  記録し、同じ日に2回実行されても2件目はスキップする設計。
+- **ハマった点（自己発見・実害なしで修正）**: 「前日のJST日付文字列」を求める際、
+  UTC変換後の期間開始時刻（＝JST 0:00ちょうど）から`toISOString().slice(0,10)`で
+  逆算する実装だと、その時刻が「前日の終わり」と「当日の始まり」のちょうど境界のため
+  1日ずれて当日の日付になってしまう（テストで発覚）。UTC変換する「前」のJST年月日フィールド
+  （`jstYesterdayStart`のUTCフィールドとして保持している値、UTC変換はまだ適用していない
+  生のJST日付部分）から直接文字列化することで解決。**JST等のタイムゾーンの「日付境界ちょうど」
+  の時刻をUTC変換して日付文字列化する処理は、変換前後どちらの値から作るかで1日ずれる
+  典型的な罠**なので、今後同種の実装をする際は変換前のフィールドから直接求めること。
+
 # ステアリング
 
 - git commitを行う際は、同じタイミングでリモート（origin）へのpushも必ず行うこと。ユーザーから別途pushを依頼されるのを待たない。
