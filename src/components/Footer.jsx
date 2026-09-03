@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, ExternalLink } from "lucide-react";
+
+const X_URL = "https://x.com/kurisure_info";
 
 const LINKS = [
   { to: "/", label: "ホーム" },
@@ -68,6 +70,10 @@ export default function Footer({ note }) {
     <footer style={styles.footer}>
       {note && <p style={styles.note}>{note}</p>}
       <SyncTimer />
+      <a href={X_URL} target="_blank" rel="noopener noreferrer" style={styles.xLink}>
+        <ExternalLink size={12} />
+        毎日のランキングをXで配信中 — @kurisure_info をフォロー
+      </a>
       <nav style={styles.links}>
         {LINKS.map((link, i) => (
           <span key={link.to} style={styles.linkGroup}>
@@ -100,6 +106,19 @@ const styles = {
     color: "#5A5A66",
     margin: "0 0 12px",
     fontVariantNumeric: "tabular-nums",
+  },
+  xLink: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+    fontSize: 12,
+    color: "#AFA9EC",
+    background: "#1C1C26",
+    border: "1px solid #2E2E3A",
+    borderRadius: 20,
+    padding: "6px 14px",
+    textDecoration: "none",
+    marginBottom: 14,
   },
   links: {
     display: "flex",

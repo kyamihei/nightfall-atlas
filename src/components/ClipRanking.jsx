@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, Users, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, Smile, Calendar, Play, Flame, Hash } from "lucide-react";
+import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, Users, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, Smile, Calendar, Play, Flame, Hash, ExternalLink } from "lucide-react";
 import {
   useClips,
   useReactions,
@@ -925,6 +925,16 @@ export default function ClipRanking() {
               <Star size={15} />
               お気に入り
             </Link>
+            <a
+              href="https://x.com/kurisure_info"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="cv-nav-link"
+              style={{ ...styles.navLink, color: "#AFA9EC", borderColor: "#3D3766" }}
+            >
+              <ExternalLink size={15} />
+              Xでフォロー
+            </a>
           </div>
           <div className="cv-search-box" style={styles.searchBox}>
             <Search size={14} color="#6B6B78" />
