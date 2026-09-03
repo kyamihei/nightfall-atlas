@@ -785,7 +785,7 @@ export default function ClipRanking() {
             <span className="cv-live-dot" style={styles.liveDot} />
             <span style={styles.eyebrow}>Twitchクリップの掲示板</span>
           </div>
-          <h1 className="clip-title-font" style={styles.h1}>
+          <h1 style={styles.h1}>
             <img src="/favicon.ico" alt="" style={styles.h1Icon} />
             クリスレ
           </h1>
@@ -1178,8 +1178,9 @@ const styles = {
   },
   eyebrow: { fontSize: 12, color: "#9797A6", letterSpacing: 0.3 },
   h1: {
-    fontSize: 30,
-    fontWeight: 600,
+    fontFamily: "'RocknRoll One', sans-serif",
+    fontSize: 32,
+    fontWeight: 400,
     margin: "0 0 6px",
     letterSpacing: 0.5,
     display: "flex",

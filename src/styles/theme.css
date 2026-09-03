@@ -3,7 +3,7 @@
    各ページのインラインstyleオブジェクトはそのまま維持し、ここでは
    フォント読み込み・スクロールバー・押下/フォーカスの触感・共通アニメーションだけを担う。 */
 
-@import url("https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&family=RocknRoll+One&display=swap");
 
 html {
   scroll-behavior: smooth;
