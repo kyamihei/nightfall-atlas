@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, Loader2, ExternalLink } from "lucide-react";
 import { useClipperProfile } from "../lib/use-clip-ranking";
 import { useDocumentMeta } from "../lib/use-document-meta";
+import { useSmartBack } from "../lib/use-smart-back";
 import Footer from "./Footer";
 import ShareButtons from "./ShareButtons";
 
@@ -39,6 +40,7 @@ function formatViews(n) {
 
 export default function ClipperDetail() {
   const { creatorId } = useParams();
+  const goBack = useSmartBack("/clippers");
   const [period, setPeriod] = useState("all"); // all | year | month | day
   const [selectedDay, setSelectedDay] = useState(() => new Date());
   const { clips, creatorName, avatarUrl, totalViews, clipCount, rank, loading, error } = useClipperProfile(
@@ -84,10 +86,10 @@ export default function ClipperDetail() {
         }
       `}</style>
 
-      <Link to="/clippers" style={styles.backLink}>
+      <button onClick={goBack} style={styles.backLink}>
         <ArrowLeft size={14} />
         クリップ職人ランキングに戻る
-      </Link>
+      </button>
 
       <header style={styles.header}>
         <div style={styles.headerRow}>
@@ -214,6 +216,11 @@ const styles = {
     gap: 6,
     color: "#8A8A99",
     fontSize: 12.5,
+    fontFamily: "inherit",
+    textDecoration: "none",
+    background: "none",
+    border: "none",
+    padding: 0,
     marginBottom: 18,
   },
   header: { borderBottom: "1px solid #24242F", paddingBottom: 18, marginBottom: 18 },

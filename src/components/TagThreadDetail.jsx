@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { ArrowLeft, Send, CornerUpLeft, X } from "lucide-react";
 import { useTagThread, useTagThreadComments } from "../lib/use-clip-ranking";
+import { useSmartBack } from "../lib/use-smart-back";
 import Footer from "./Footer";
 
 function timeAgo(ts) {
@@ -16,6 +17,7 @@ function timeAgo(ts) {
 
 export default function TagThreadDetail() {
   const { id } = useParams();
+  const goBack = useSmartBack("/threads");
   const { thread, loading: threadLoading } = useTagThread(id);
   const { comments, submit, submitting, error: commentError } = useTagThreadComments(id);
 
@@ -70,10 +72,10 @@ export default function TagThreadDetail() {
   if (!threadLoading && !thread) {
     return (
       <div style={styles.page}>
-        <Link to="/threads" style={styles.backLink}>
+        <button onClick={goBack} style={styles.backLink}>
           <ArrowLeft size={14} />
           タグスレ一覧に戻る
-        </Link>
+        </button>
         <p style={styles.notFound}>このスレは見つかりませんでした。</p>
         <Footer />
       </div>
@@ -89,10 +91,10 @@ export default function TagThreadDetail() {
         textarea:focus, input:focus { outline: 2px solid #FF4D6D33; }
       `}</style>
 
-      <Link to="/threads" style={styles.backLink}>
+      <button onClick={goBack} style={styles.backLink}>
         <ArrowLeft size={14} />
         タグスレ一覧に戻る
-      </Link>
+      </button>
 
       <header style={styles.header}>
         <h1 className="clip-title-font" style={styles.h1}>
@@ -175,7 +177,11 @@ const styles = {
     gap: 6,
     color: "#8A8A99",
     fontSize: 12.5,
+    fontFamily: "inherit",
     textDecoration: "none",
+    background: "none",
+    border: "none",
+    padding: 0,
     marginBottom: 18,
   },
   notFound: { color: "#8A8A99", fontSize: 14, textAlign: "center", padding: "40px 0" },

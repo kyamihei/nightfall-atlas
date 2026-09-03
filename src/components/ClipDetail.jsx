@@ -15,6 +15,7 @@ import {
 } from "../lib/use-clip-ranking";
 import { REACTIONS_ENABLED } from "../lib/feature-flags";
 import { useDocumentMeta } from "../lib/use-document-meta";
+import { useSmartBack } from "../lib/use-smart-back";
 import Footer from "./Footer";
 import ShareButtons from "./ShareButtons";
 
@@ -45,6 +46,7 @@ function timeAgo(ts) {
 
 export default function ClipDetail() {
   const { id } = useParams();
+  const goBack = useSmartBack("/");
   const { clip, loading, error } = useClip(id);
   // clip ? [clip.id] : [] を毎レンダー新しい配列として作ると、これに依存する
   // useReactions/useFavorites/useFavoriteCountsのuseEffectが再発火し続け、
@@ -115,10 +117,10 @@ export default function ClipDetail() {
   if (error || !clip) {
     return (
       <div style={styles.page}>
-        <Link to="/" style={styles.backLink}>
+        <button onClick={goBack} style={styles.backLink}>
           <ArrowLeft size={14} />
           ランキングに戻る
-        </Link>
+        </button>
         <p style={styles.errorText}>{error || "クリップが見つかりませんでした"}</p>
       </div>
     );
@@ -136,10 +138,10 @@ export default function ClipDetail() {
         textarea:focus, input:focus { outline: 2px solid #FF4D6D33; }
       `}</style>
 
-      <Link to="/" style={styles.backLink}>
+      <button onClick={goBack} style={styles.backLink}>
         <ArrowLeft size={14} />
         ランキングに戻る
-      </Link>
+      </button>
 
       <div style={styles.playerWrap}>
         <iframe
@@ -394,8 +396,12 @@ const styles = {
     gap: 6,
     color: "#8A8A99",
     fontSize: 12.5,
+    fontFamily: "inherit",
     textDecoration: "none",
     marginBottom: 18,
+    background: "none",
+    border: "none",
+    padding: 0,
   },
   errorText: { color: "#F0997B", fontSize: 14 },
   playerWrap: { marginBottom: 18 },

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, Users, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, Smile, Calendar, Play, Flame, Hash, ExternalLink } from "lucide-react";
 import {
   useClips,
@@ -731,8 +731,14 @@ export default function ClipRanking() {
 
   // ランキング欄／トレンド欄のタブ切り替え。slideDirは切り替え時のスライド方向
   // （タブクリックでは並び順から、スワイプでは指の動きから決める）。
+  // 選択中のタブはURLのクエリ（?view=trending）にも反映する。クリップ詳細ページから
+  // ブラウザの戻る/「戻る」リンクで復帰した際に、トレンドタブを見ていたのにランキングタブへ
+  // 戻ってしまう（活性タブがコンポーネント内のstateだけで管理されており、詳細ページへの遷移で
+  // アンマウントされると失われるため）不具合の対応（2026-09-04）。
   const VIEW_TABS = ["ranking", "trending"];
-  const [activeView, setActiveView] = useState("ranking");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialView = searchParams.get("view") === "trending" ? "trending" : "ranking";
+  const [activeView, setActiveView] = useState(initialView);
   const [slideDir, setSlideDir] = useState("right");
   const touchStartXRef = useRef(null);
 
@@ -740,6 +746,15 @@ export default function ClipRanking() {
     setActiveView((prev) => {
       if (prev === next) return prev;
       setSlideDir(VIEW_TABS.indexOf(next) > VIEW_TABS.indexOf(prev) ? "right" : "left");
+      setSearchParams(
+        (params) => {
+          const next2 = new URLSearchParams(params);
+          if (next === "ranking") next2.delete("view");
+          else next2.set("view", next);
+          return next2;
+        },
+        { replace: true },
+      );
       return next;
     });
   }
@@ -965,7 +980,7 @@ export default function ClipRanking() {
           style={activeView === "trending" ? styles.viewTabActive : styles.viewTab}
         >
           <TrendingUp size={14} />
-          いまトレンド
+          トレンドランキング
         </button>
       </div>
 
