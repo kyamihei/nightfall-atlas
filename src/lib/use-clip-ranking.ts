@@ -1468,6 +1468,13 @@ export function useClipSearch(query: string) {
         setResults([]);
       } else {
         setResults(data ?? []);
+        // 管理画面の「よく検索されているキーワード」表示用。失敗しても検索体験には影響させない
+        supabase
+          .from("search_log")
+          .insert({ query: trimmed, result_count: (data ?? []).length })
+          .then(({ error: logError }) => {
+            if (logError) console.warn("search_log insert failed", logError.message);
+          });
       }
       setLoading(false);
     })();

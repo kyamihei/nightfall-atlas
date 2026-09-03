@@ -1,12 +1,32 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Lock, LogOut, Mail, Flag, UserPlus, EyeOff, Eye, Check } from "lucide-react";
+import {
+  ArrowLeft, Lock, LogOut, Mail, Flag, UserPlus, EyeOff, Eye, Check,
+  LayoutDashboard, Users, Film, MessageCircle, Heart, Smile, Tag, Hash,
+  TrendingUp, Search, RefreshCw, Clock,
+} from "lucide-react";
 import {
   useAdminAuth,
+  useAdminDashboard,
   useAdminContactMessages,
   useAdminCommentReports,
   useAdminBroadcasterRequests,
 } from "../lib/use-admin";
+
+function formatNumber(n) {
+  return new Intl.NumberFormat("ja-JP").format(n ?? 0);
+}
+
+function timeAgo(ts) {
+  if (!ts) return "―";
+  const diff = Math.max(0, Date.now() - new Date(ts).getTime());
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return "たった今";
+  if (min < 60) return `${min}分前`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}時間前`;
+  return `${Math.floor(hr / 24)}日前`;
+}
 
 const CATEGORY_LABELS = {
   bug: "不具合の報告",
@@ -54,6 +74,193 @@ function LoginForm({ login, verifying, error }) {
         </button>
         {error && <p style={styles.errorText}>{error}</p>}
       </div>
+    </div>
+  );
+}
+
+function StatCard({ icon: Icon, label, value, sub }) {
+  return (
+    <div style={styles.statCard}>
+      <div style={styles.statHead}>
+        <Icon size={13} color="#8A8A99" />
+        <span style={styles.statLabel}>{label}</span>
+      </div>
+      <div style={styles.statValue}>{formatNumber(value)}</div>
+      {sub && <div style={styles.statSub}>{sub}</div>}
+    </div>
+  );
+}
+
+function Section({ icon: Icon, title, children }) {
+  return (
+    <div style={styles.section}>
+      <div style={styles.sectionTitle}>
+        <Icon size={14} color="#AFA9EC" />
+        {title}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function RankRow({ rank, label, value, link }) {
+  const inner = (
+    <>
+      <span style={styles.rankNum}>{rank}</span>
+      <span style={styles.rankLabel}>{label}</span>
+      <span style={styles.rankValue}>{value}</span>
+    </>
+  );
+  return link ? (
+    <Link to={link} style={styles.rankRowLink}>
+      {inner}
+    </Link>
+  ) : (
+    <div style={styles.rankRow}>{inner}</div>
+  );
+}
+
+function DashboardPanel({ password }) {
+  const { data, loading, error, refresh } = useAdminDashboard(password);
+
+  if (loading && !data) return <p style={styles.loadingText}>読み込み中…</p>;
+  if (error) return <p style={styles.errorText}>{error}</p>;
+  if (!data) return null;
+
+  const { overview, growth, moderation, search } = data;
+  const syncedPct = overview.total_clips
+    ? Math.round((growth.view_synced_count / overview.total_clips) * 100)
+    : 0;
+
+  return (
+    <div>
+      <button onClick={refresh} style={styles.refreshBtn}>
+        <RefreshCw size={12} />
+        更新
+      </button>
+
+      <Section icon={Users} title="全体サマリー">
+        <div style={styles.statGrid}>
+          <StatCard icon={Film} label="総クリップ数" value={overview.total_clips} />
+          <StatCard icon={Users} label="配信者数" value={overview.total_broadcasters} />
+          <StatCard icon={Users} label="クリップ職人数" value={overview.total_clippers} />
+          <StatCard icon={MessageCircle} label="総コメント数" value={overview.total_comments} sub={`うち非表示 ${formatNumber(overview.hidden_comments)}`} />
+          <StatCard icon={Heart} label="お気に入り数" value={overview.total_favorites} />
+          <StatCard icon={Smile} label="スタンプ数" value={overview.total_reaction_stamps} />
+          <StatCard icon={Hash} label="タグスレ数" value={overview.total_tag_threads} sub={`コメント${formatNumber(overview.total_tag_thread_comments)}件`} />
+          <StatCard icon={Tag} label="配信者タグ" value={overview.total_broadcaster_tags} sub={`種類${formatNumber(overview.unique_tags)}`} />
+          <StatCard icon={Users} label="総訪問者数" value={overview.total_visitors} sub="匿名セッション累計" />
+        </div>
+      </Section>
+
+      <Section icon={TrendingUp} title="直近の伸び">
+        <div style={styles.statGrid}>
+          <StatCard icon={Film} label="新規クリップ(24h)" value={growth.new_clips_24h} />
+          <StatCard icon={Film} label="新規クリップ(7日)" value={growth.new_clips_7d} />
+          <StatCard icon={MessageCircle} label="新規コメント(24h)" value={growth.new_comments_24h} />
+          <StatCard icon={MessageCircle} label="新規コメント(7日)" value={growth.new_comments_7d} />
+        </div>
+        <p style={styles.metaLine}>最新クリップ: {timeAgo(growth.latest_clip_created_at)}</p>
+        <p style={styles.metaLine}>
+          view_count同期率: {syncedPct}%（{formatNumber(growth.view_synced_count)} / {formatNumber(overview.total_clips)}）
+          ・最も古い同期: {timeAgo(growth.oldest_view_sync_at)}
+        </p>
+      </Section>
+
+      <Section icon={TrendingUp} title="人気ランキング TOP5">
+        <div style={styles.rankGrid}>
+          <div>
+            <p style={styles.rankGroupTitle}>配信者（総視聴回数）</p>
+            {(data.top_broadcasters ?? []).map((b, i) => (
+              <RankRow key={b.streamer} rank={i + 1} label={b.streamer} value={formatNumber(b.total_views)} link={`/broadcasters/${encodeURIComponent(b.streamer)}`} />
+            ))}
+          </div>
+          <div>
+            <p style={styles.rankGroupTitle}>クリップ職人（総視聴回数）</p>
+            {(data.top_clippers ?? []).map((c, i) => (
+              <RankRow key={c.creator_id} rank={i + 1} label={c.creator_name} value={formatNumber(c.total_views)} link={`/clippers/${c.creator_id}`} />
+            ))}
+          </div>
+          <div>
+            <p style={styles.rankGroupTitle}>クリップ（視聴回数）</p>
+            {(data.top_clips_by_views ?? []).map((c, i) => (
+              <RankRow key={c.id} rank={i + 1} label={c.title} value={formatNumber(c.view_count)} link={`/clips/${c.id}`} />
+            ))}
+          </div>
+          <div>
+            <p style={styles.rankGroupTitle}>クリップ（コメント数）</p>
+            {(data.top_clips_by_comments ?? []).map((c, i) => (
+              <RankRow key={c.id} rank={i + 1} label={c.title} value={`${formatNumber(c.comment_count)}件`} link={`/clips/${c.id}`} />
+            ))}
+            {(data.top_clips_by_comments ?? []).length === 0 && <p style={styles.emptyText}>まだありません</p>}
+          </div>
+        </div>
+        {(data.top_broadcaster_tags ?? []).length > 0 && (
+          <>
+            <p style={styles.rankGroupTitle}>人気タグ</p>
+            <div style={styles.tagChips}>
+              {data.top_broadcaster_tags.map((t) => (
+                <span key={t.tag} style={styles.tagChip}>
+                  {t.tag} <span style={styles.tagChipCount}>{t.use_count}</span>
+                </span>
+              ))}
+            </div>
+          </>
+        )}
+      </Section>
+
+      <Section icon={Hash} title="新着タグスレ">
+        {(data.recent_tag_threads ?? []).length === 0 && <p style={styles.emptyText}>まだありません</p>}
+        {(data.recent_tag_threads ?? []).map((t) => (
+          <Link key={t.id} to={`/threads/${t.id}`} style={styles.rankRowLink}>
+            <span style={styles.rankLabel}>{t.title}</span>
+            <span style={styles.rankValue}>{formatNumber(t.comment_count)}件・{timeAgo(t.created_at)}</span>
+          </Link>
+        ))}
+      </Section>
+
+      <Section icon={Flag} title="モデレーション状況">
+        <div style={styles.statGrid}>
+          <StatCard icon={Mail} label="未読お問い合わせ" value={moderation.unread_contact_count} />
+          <StatCard icon={Flag} label="通報中コメント" value={moderation.reported_visible_comments} />
+          <StatCard icon={UserPlus} label="保留中リクエスト" value={moderation.pending_broadcaster_requests} />
+        </div>
+      </Section>
+
+      <Section icon={Search} title="検索キーワード">
+        <p style={styles.rankGroupTitle}>直近7日間の人気ワード</p>
+        {(search.top_queries_7d ?? []).length === 0 && <p style={styles.emptyText}>まだありません</p>}
+        <div style={styles.tagChips}>
+          {(search.top_queries_7d ?? []).map((q) => (
+            <span key={q.query} style={styles.tagChip}>
+              {q.query} <span style={styles.tagChipCount}>{q.search_count}</span>
+            </span>
+          ))}
+        </div>
+        {(search.recent_searches ?? []).length > 0 && (
+          <>
+            <p style={styles.rankGroupTitle}>直近の検索ログ</p>
+            {search.recent_searches.map((s, i) => (
+              <div key={i} style={styles.rankRow}>
+                <span style={styles.rankLabel}>{s.query}</span>
+                <span style={styles.rankValue}>{s.result_count}件・{timeAgo(s.created_at)}</span>
+              </div>
+            ))}
+          </>
+        )}
+      </Section>
+
+      <Section icon={Clock} title="定期同期(pg_cron)の実行状況">
+        {(data.cron_runs ?? []).map((r, i) => (
+          <div key={i} style={styles.rankRow}>
+            <span style={{ ...styles.cronStatus, color: r.status === "succeeded" ? "#5DCAA5" : "#F0997B" }}>
+              {r.status === "succeeded" ? "成功" : r.status}
+            </span>
+            <span style={styles.rankLabel}>{r.jobname}</span>
+            <span style={styles.rankValue}>{timeAgo(r.start_time)}</span>
+          </div>
+        ))}
+      </Section>
     </div>
   );
 }
@@ -154,6 +361,7 @@ function BroadcasterRequestsPanel({ password }) {
 }
 
 const TABS = [
+  { key: "dashboard", label: "ダッシュボード", icon: LayoutDashboard },
   { key: "contact", label: "お問い合わせ", icon: Mail },
   { key: "reports", label: "コメント通報", icon: Flag },
   { key: "requests", label: "配信者リクエスト", icon: UserPlus },
@@ -161,7 +369,7 @@ const TABS = [
 
 export default function AdminPage() {
   const { password, isAuthed, login, logout, verifying, error } = useAdminAuth();
-  const [activeTab, setActiveTab] = useState("contact");
+  const [activeTab, setActiveTab] = useState("dashboard");
 
   if (!isAuthed) return <LoginForm login={login} verifying={verifying} error={error} />;
 
@@ -201,6 +409,7 @@ export default function AdminPage() {
         })}
       </div>
 
+      {activeTab === "dashboard" && <DashboardPanel password={password} />}
       {activeTab === "contact" && <ContactMessagesPanel password={password} />}
       {activeTab === "reports" && <CommentReportsPanel password={password} />}
       {activeTab === "requests" && <BroadcasterRequestsPanel password={password} />}
@@ -214,7 +423,7 @@ const styles = {
     background: "#14141B",
     color: "#EDEDF2",
     padding: "28px 32px 60px",
-    maxWidth: 800,
+    maxWidth: 1040,
     margin: "0 auto",
   },
   loginBox: {
@@ -334,4 +543,88 @@ const styles = {
     padding: "5px 10px",
     fontSize: 12,
   },
+  refreshBtn: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    background: "#1C1C26",
+    border: "1px solid #2E2E3A",
+    color: "#C4C4D0",
+    borderRadius: 6,
+    padding: "6px 12px",
+    fontSize: 12,
+    marginBottom: 16,
+  },
+  section: {
+    background: "#1A1A23",
+    border: "1px solid #24242F",
+    borderRadius: 12,
+    padding: "16px 18px",
+    marginBottom: 14,
+  },
+  sectionTitle: {
+    display: "flex",
+    alignItems: "center",
+    gap: 7,
+    fontSize: 13.5,
+    fontWeight: 600,
+    color: "#EDEDF2",
+    marginBottom: 12,
+  },
+  statGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
+    gap: 10,
+  },
+  statCard: {
+    background: "#1C1C26",
+    border: "1px solid #24242F",
+    borderRadius: 8,
+    padding: "10px 12px",
+  },
+  statHead: { display: "flex", alignItems: "center", gap: 5, marginBottom: 6 },
+  statLabel: { fontSize: 11, color: "#8A8A99" },
+  statValue: { fontSize: 19, fontWeight: 700, color: "#EDEDF2" },
+  statSub: { fontSize: 10.5, color: "#5A5A66", marginTop: 2 },
+  metaLine: { fontSize: 12, color: "#8A8A99", margin: "10px 0 0" },
+  rankGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: 16,
+  },
+  rankGroupTitle: { fontSize: 11.5, color: "#8A8A99", margin: "12px 0 6px", fontWeight: 600 },
+  rankRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "5px 0",
+    fontSize: 12.5,
+    borderBottom: "1px solid #20202A",
+  },
+  rankRowLink: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "5px 0",
+    fontSize: 12.5,
+    borderBottom: "1px solid #20202A",
+    color: "#DADAE2",
+    textDecoration: "none",
+  },
+  rankNum: { color: "#5A5A66", fontSize: 11, width: 14, flexShrink: 0 },
+  rankLabel: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  rankValue: { color: "#8A8A99", fontSize: 11.5, flexShrink: 0 },
+  tagChips: { display: "flex", flexWrap: "wrap", gap: 6 },
+  tagChip: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 4,
+    fontSize: 11.5,
+    color: "#AFA9EC",
+    background: "#241F3A",
+    borderRadius: 12,
+    padding: "3px 10px",
+  },
+  tagChipCount: { color: "#7A76A8", fontSize: 10.5 },
+  cronStatus: { fontSize: 11, fontWeight: 600, width: 32, flexShrink: 0 },
 };

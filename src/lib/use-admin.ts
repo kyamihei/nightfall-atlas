@@ -109,6 +109,30 @@ export function useAdminCommentReports(password) {
   return { reports, loading, error, refresh, setHidden };
 }
 
+export function useAdminDashboard(password) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const refresh = useCallback(async () => {
+    if (!password) return;
+    setLoading(true);
+    const { data, error } = await supabase.rpc("admin_get_dashboard", { p_password: password });
+    if (error) setError(error.message);
+    else {
+      setData(data);
+      setError(null);
+    }
+    setLoading(false);
+  }, [password]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  return { data, loading, error, refresh };
+}
+
 export function useAdminBroadcasterRequests(password) {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
