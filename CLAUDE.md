@@ -46,6 +46,11 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   `useActivityFeed` / `useBroadcasterTags` / `useTagThreads`関連 など多数）。`favorites`テーブル・RLSは
   Supabaseスキーマに元々あったがUIが未実装だったため2026-09-02に`useFavorites`/`useMyFavorites`と
   UIを追加して完成させた
+- `src/lib/use-smart-back.js` - 詳細ページの「戻る」リンク用の`useSmartBack`フック（サイト内遷移なら
+  ブラウザ履歴を戻る、直接URLアクセス等で戻り先が無ければfallbackへ、詳細は「詳細ページからの
+  「戻る」が直前のタブ状態を復元できないバグ修正」節参照）
+- `src/lib/use-activity-feed-prefs.js` - トップページのお知らせフィード表示設定
+  （`useActivityFeedPrefs`、localStorageのみで完結、詳細は「お知らせフィードの表示カスタマイズ」節参照）
 - `src/lib/use-admin.ts` - 管理画面専用のデータ層フック集（`useAdminAuth`/`useAdminDashboard`/`useAdminContactMessages`等）
 - `src/lib/use-document-meta.js` - クリップ/配信者/クリップ職人の個別ページでdocument.title・meta description等を
   動的更新する`useDocumentMeta`フック（SEO対応、詳細は「SEO強化とSNSシェア導線」節参照）
@@ -84,6 +89,15 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
     `(param is null or col >= param)`という書き方はPostgRESTの汎用実行計画で索引が効かなくなり
     タイムアウトする（本番で実測・修正済み）。同様のRPCを今後追加する際は同じ罠に注意すること。
   - `idx_clips_view_count`（view_count desc単索引）を追加済み。「全期間×視聴回数順」がこの索引を使う。
+  - **（未修正の既知の問題、2026-09-04発見）**「日別×視聴回数順」は上記索引の対象外のため、
+    本番で`get_ranked_clips`が57014（statement timeout）を返すことを確認した（お知らせフィード
+    カスタマイズ機能の実装中、無関係な動作確認で偶然遭遇。`curl`で`period_start`/`period_end`を
+    当日0時〜24時（JST）に絞り`sort_by=views`を直接叩いて再現・特定。ユーザー報告ではなく
+    本セッションでの発見のため未対応、対応するかはユーザーの判断待ち）。`idx_clips_period_ranking`
+    （期間絞り込み用、既存）はあるが、そこに`view_count desc`を絡めた複合索引が無いのが原因と
+    見られる。対応する場合は「クリップ職人ランキング」節等と同じ「まず本番相手にEXPLAIN
+    ANALYZEで実際のプランを確認してから索引を検討する」進め方が安全（推測だけで索引を追加すると
+    無駄になるか、かえって遅くなることがあるため）。
 - コメントに1階層のみの返信機能を追加（`comments.parent_id`）。`post-comment` Edge Functionが
   返信先の検証（同じクリップに属するか、返信への返信でないか）を行う。UIは`ClipRanking.jsx`の
   `CommentSidebar`と`ClipDetail.jsx`の両方に実装（重複コードだが元々の構造を踏襲）。
@@ -561,6 +575,34 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
 - **タブ名変更**（同日、ユーザー指示）: 「ランキング」→「**総合ランキング**」、
   「いまトレンド」→「**トレンドランキング**」（いずれも`ClipRanking.jsx`のタブボタンラベルのみ、
   `activeView`の内部値（`"ranking"`/`"trending"`）やURLクエリ（`?view=trending`）は変更していない）。
+
+## お知らせフィードの表示カスタマイズ（2026-09-04追加）
+
+- 「お知らせフィード（ライブ活動フィード）を自分好みにカスタマイズしたい、例えば指定したタグの
+  最新クリップのみお知らせするとか」という要望への対応。`ActivityTicker`の右に歯車アイコンの
+  設定ボタンを追加し、ポップオーバーで以下を設定できるようにした（`periodPickerOpen`と同じ
+  「外側クリックで閉じる」パターンを流用）。
+  - **種類ごとの表示ON/OFF**（新着コメント/リアクションスタンプ/新着クリップ/盛り上がっている
+    スレ/急上昇中のクリップ職人の5種類、`ACTIVITY_FEED_TYPES`）。
+  - **「新着クリップ」を自分の配信者タグ（`broadcaster_tags`、配信者詳細ページで付けられる
+    「マイタグ」）で絞り込む**セレクター（自分がタグを1つも持っていなければセレクター自体を
+    非表示。トップページの「マイタグで絞り込み」（`useMyBroadcasterTags`の`streamersByTag`）と
+    同じデータを使い回している）。
+- 設定は新規`src/lib/use-activity-feed-prefs.js`（`useActivityFeedPrefs`フック）が
+  **localStorageのみ**で保持する。お気に入り/配信者タグ等は匿名認証のanon_id経由でDBに保存して
+  端末をまたいで使えるようにしているが、これは純粋な表示上の好みでありデバイス間同期の必要性が
+  薄いと判断し、あえてバックエンドに触れない設計にした（アカウント機能が無いサイトのため
+  「この端末のこのブラウザだけの設定」という制約は許容している）。
+  - フィルタ自体はDBクエリを変えず、`useActivityFeed(15)`が取得済みの直近15件を
+    `ClipRanking.jsx`側で表示直前にクライアント側で絞り込む方式（`filteredActivityItems`の
+    `useMemo`）。絞り込み条件によっては表示件数が実質的に減る（最悪、何も表示されず
+    `ActivityTicker`が`null`を返す）ことを許容している。DB側のクエリ自体を絞り込みたくなった
+    場合（例: タグ絞り込み時だけ多めに取得する等）は`useActivityFeed`側の変更が必要になる。
+  - タグ絞り込みは現状「新着クリップ」タイプにのみ適用している（このタイプだけ元々
+    `streamer`フィールドを持っているため）。コメント/スタンプ/盛り上がっているスレは
+    クリップに紐づくがitem側にstreamer情報を持たせていないため対象外、急上昇中のクリップ職人は
+    配信者ではなくクリッパー単位のため元々配信者タグとは紐付かない。将来これらにもタグ絞り込みを
+    広げる場合は、`useActivityFeed`側で該当クエリに`streamer`列を追加する必要がある。
 
 ## 最新クリップ反映の高速化・tracked_broadcasters取得の1000件上限バグ修正（2026-09-03追加）
 

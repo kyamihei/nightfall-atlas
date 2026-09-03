@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, Users, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, Smile, Calendar, Play, Flame, Hash, ExternalLink } from "lucide-react";
+import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, Users, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, Smile, Calendar, Play, Flame, Hash, ExternalLink, Settings } from "lucide-react";
 import {
   useClips,
   useReactions,
@@ -20,6 +20,7 @@ import {
   useMyBroadcasterTags,
 } from "../lib/use-clip-ranking";
 import { REACTIONS_ENABLED } from "../lib/feature-flags";
+import { useActivityFeedPrefs, ACTIVITY_FEED_TYPES } from "../lib/use-activity-feed-prefs";
 import Footer from "./Footer";
 
 const PERIOD_TABS = [
@@ -677,6 +678,36 @@ export default function ClipRanking() {
   const { clips: trendingClips, loading: trendingLoading } = useTrendingClips(5, 72);
   const { items: activityItems } = useActivityFeed(15);
 
+  // お知らせフィード（ライブ活動フィード）の表示設定。「指定したタグの新着クリップだけ知りたい」
+  // という要望への対応（2026-09-04）。種類ごとのON/OFFと、「新着クリップ」を自分の配信者タグで
+  // 絞り込む設定をlocalStorageに保存し、取得済みのactivityItemsを表示直前にクライアント側で絞り込む
+  // （DB側のクエリ自体は変えない。件数上限15件の中からの絞り込みなので、絞り込み条件次第では
+  // 表示件数が実質的に減ることを許容している）。
+  const { prefs: activityFeedPrefs, toggleType: toggleActivityFeedType, setNewClipTag } = useActivityFeedPrefs();
+  const filteredActivityItems = useMemo(() => {
+    const tagStreamers = activityFeedPrefs.newClipTag
+      ? new Set(streamersByTag[activityFeedPrefs.newClipTag] ?? [])
+      : null;
+    return activityItems.filter((item) => {
+      if (!activityFeedPrefs.types[item.type]) return false;
+      if (item.type === "new_clip" && tagStreamers && !tagStreamers.has(item.streamer)) return false;
+      return true;
+    });
+  }, [activityItems, activityFeedPrefs, streamersByTag]);
+  const [activityPrefsOpen, setActivityPrefsOpen] = useState(false);
+  const activityPrefsRef = useRef(null);
+
+  useEffect(() => {
+    if (!activityPrefsOpen) return;
+    function handleClickOutside(e) {
+      if (activityPrefsRef.current && !activityPrefsRef.current.contains(e.target)) {
+        setActivityPrefsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [activityPrefsOpen]);
+
   // ランキング欄とトレンド欄を同じ場所でタブ切り替え表示するため、リアクション/お気に入り/
   // スタンプ/アバター/クリッパー順位はどちらのタブに出てくるクリップIDもまとめて取得しておく
   // （タブを切り替えるたびに読み込み直すと表示がちらつくため）。
@@ -963,7 +994,59 @@ export default function ClipRanking() {
         </div>
       </header>
 
-      <ActivityTicker items={activityItems} />
+      <div style={styles.activityBarRow}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <ActivityTicker items={filteredActivityItems} />
+        </div>
+        <div ref={activityPrefsRef} style={styles.activityPrefsWrap}>
+          <button
+            onClick={() => setActivityPrefsOpen((o) => !o)}
+            style={styles.activityPrefsBtn}
+            aria-expanded={activityPrefsOpen}
+            aria-label="お知らせフィードの設定"
+            title="お知らせフィードの設定"
+          >
+            <Settings size={14} />
+          </button>
+          {activityPrefsOpen && (
+            <div className="cv-fade-in" style={styles.activityPrefsPanel}>
+              <p style={styles.activityPrefsTitle}>お知らせフィードの設定</p>
+              <div style={styles.activityPrefsCheckboxList}>
+                {ACTIVITY_FEED_TYPES.map((t) => (
+                  <label key={t.value} style={styles.activityPrefsCheckboxRow}>
+                    <input
+                      type="checkbox"
+                      checked={activityFeedPrefs.types[t.value]}
+                      onChange={() => toggleActivityFeedType(t.value)}
+                    />
+                    {t.label}
+                  </label>
+                ))}
+              </div>
+              {myTags.length > 0 && (
+                <div style={styles.activityPrefsTagFilter}>
+                  <label style={styles.activityPrefsTagLabel} htmlFor="activity-new-clip-tag">
+                    新着クリップをタグで絞り込む
+                  </label>
+                  <select
+                    id="activity-new-clip-tag"
+                    value={activityFeedPrefs.newClipTag}
+                    onChange={(e) => setNewClipTag(e.target.value)}
+                    style={styles.sortSelect}
+                  >
+                    <option value="">絞り込みなし</option>
+                    {myTags.map((tag) => (
+                      <option key={tag} value={tag}>
+                        {tag}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
 
       <WeeklyClipperBoard clippers={weeklyClippers} loading={weeklyClippersLoading} />
 
@@ -1452,7 +1535,6 @@ const styles = {
     border: "1px solid #24242F",
     borderRadius: 8,
     padding: "9px 14px",
-    marginBottom: 20,
     textDecoration: "none",
     color: "#9797A6",
     fontSize: 12.5,
@@ -1460,6 +1542,50 @@ const styles = {
   },
   activityDot: { flexShrink: 0 },
   activityText: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  activityBarRow: { display: "flex", alignItems: "center", gap: 8, marginBottom: 20 },
+  activityPrefsWrap: { position: "relative", flexShrink: 0 },
+  activityPrefsBtn: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 34,
+    height: 34,
+    background: "#1C1C26",
+    border: "1px solid #2E2E3A",
+    color: "#9797A6",
+    borderRadius: 8,
+  },
+  activityPrefsPanel: {
+    position: "absolute",
+    top: "calc(100% + 8px)",
+    right: 0,
+    zIndex: 20,
+    background: "#1C1C26",
+    border: "1px solid #2E2E3A",
+    borderRadius: 10,
+    padding: 14,
+    boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+    minWidth: 240,
+  },
+  activityPrefsTitle: { fontSize: 13, fontWeight: 600, color: "#EDEDF2", margin: "0 0 10px" },
+  activityPrefsCheckboxList: { display: "flex", flexDirection: "column", gap: 8 },
+  activityPrefsCheckboxRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    fontSize: 12.5,
+    color: "#C4C4D0",
+    cursor: "pointer",
+  },
+  activityPrefsTagFilter: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTop: "1px solid #24242F",
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+  },
+  activityPrefsTagLabel: { fontSize: 12, color: "#8A8A99" },
   weeklyBoard: {
     background: "#1C1C26",
     border: "1px solid #24242F",
