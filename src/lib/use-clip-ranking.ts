@@ -57,9 +57,11 @@ export function getPeriodRange(period: Period, referenceDate: Date = new Date())
     end.setMonth(start.getMonth() + 1, 1);
     end.setHours(0, 0, 0, 0);
   } else {
-    // day: tw-clipに合わせて「その日の朝6時〜翌朝6時」を1日の区切りとする
-    start.setHours(6, 0, 0, 0);
-    if (referenceDate.getHours() < 6) start.setDate(start.getDate() - 1);
+    // day: 0時〜24時を1日の区切りとする。以前はtw-clipに合わせて朝6時〜翌朝6時だったが、
+    // 早朝（0〜6時）に作られたクリップが「前日」扱いになり、0時基準の競合サイトと比較した際に
+    // 「クリップが無い」と誤解される紛らわしさがあったため、2026-09-03にユーザーの指示で
+    // 一般的な0時基準に変更した。
+    start.setHours(0, 0, 0, 0);
     end.setTime(start.getTime());
     end.setDate(end.getDate() + 1);
   }
