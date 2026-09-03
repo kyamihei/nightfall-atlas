@@ -973,7 +973,7 @@ export default function ClipRanking() {
           style={activeView === "ranking" ? styles.viewTabActive : styles.viewTab}
         >
           <ListChecks size={14} />
-          ランキング
+          総合ランキング
         </button>
         <button
           onClick={() => switchView("trending")}
