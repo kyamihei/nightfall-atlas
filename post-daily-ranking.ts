@@ -40,14 +40,18 @@ function formatViews(n: number): string {
   return new Intl.NumberFormat("ja-JP").format(n);
 }
 
-// Xの投稿は280文字（日本語は1字2カウント）が上限。クリップタイトルはユーザー投稿の
-// Twitch側の値でTwitch上は最大100文字程度あり得るため、長いタイトルでも安全に収まるよう
-// 保守的に切り詰める。配信者名25文字・視聴回数8桁という最悪ケースで試算したところ
-// 固定文言だけで重み221（ほぼ280に近い）を使うため、タイトルに使える予算は実質29文字分しかない
-// （50文字のつもりで実装したところ本番相当のデータで検証して発覚、余裕を見て25文字にした）。
-const MAX_TITLE_CHARS = 25;
+// Xの投稿は280文字（日本語は1字2カウント）が上限。クリップタイトル・配信者名・クリップ職人名は
+// いずれもユーザー/Twitch側の値（Twitchのログイン名は最大25文字、クリップタイトルは
+// 100文字程度あり得る）で、3つとも長い最悪ケースを想定して安全な上限を設けている
+// （配信者名15文字＋クリップ職人名15文字＋タイトル15文字の組み合わせで試算し、重み274/280に収まる
+// ことを確認済み。1つの上限だけ緩めると簡単に超過するため、3つセットで管理すること）。
+const MAX_TITLE_CHARS = 15;
+const MAX_NAME_CHARS = 15;
+function truncateTo(str: string, maxChars: number): string {
+  return str.length > maxChars ? `${str.slice(0, maxChars)}…` : str;
+}
 function truncateTitle(title: string): string {
-  return title.length > MAX_TITLE_CHARS ? `${title.slice(0, MAX_TITLE_CHARS)}…` : title;
+  return truncateTo(title, MAX_TITLE_CHARS);
 }
 
 /** nowをJSTの壁時計時刻としてUTCフィールドに詰め直したDate（年月日・曜日の算出専用、実時刻としては使わない） */
@@ -173,7 +177,7 @@ async function buildRankingPost(
   const { start, end, dateStr } = yesterdayJstRangeUtc(new Date());
   const { data: topClips, error } = await supabase
     .from("clips")
-    .select("id, title, streamer, view_count")
+    .select("id, title, streamer, view_count, creator_id, creator_name")
     .neq("id", "__general_thread__")
     .gte("twitch_created_at", start)
     .lt("twitch_created_at", end)
@@ -190,10 +194,17 @@ async function buildRankingPost(
     return null;
   }
 
+  // クリップ職人の機能も毎日の投稿で目に触れるよう、クリップの作者（判明している場合）を
+  // クレジット行として添える。Twitch側で作者が特定できなかった古いクリップはcreator_idが
+  // '__unknown__'になっている（詳細はCLAUDE.md「クリップ職人ランキング」節）ため、その場合は省略する。
+  const hasCreator = top.creator_id && top.creator_id !== "__unknown__" && top.creator_name;
+  const creatorLine = hasCreator ? [`✂️ ${truncateTo(top.creator_name, MAX_NAME_CHARS)}さんが作成`] : [];
+
   const text = [
     `昨日のTwitchクリップ、一番見られたのは誰のクリップだったと思う？`,
     ``,
-    `正解は…${top.streamer}さん「${truncateTitle(top.title)}」（${formatViews(top.view_count)}回視聴）`,
+    `正解は…${truncateTo(top.streamer, MAX_NAME_CHARS)}さん「${truncateTitle(top.title)}」（${formatViews(top.view_count)}回視聴）`,
+    ...creatorLine,
     ``,
     `${BOARD_PITCH}で続きをチェック👇`,
     `${SITE_ORIGIN}/clips/${top.id}`,
