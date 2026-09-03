@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, Users, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, Smile, Calendar } from "lucide-react";
+import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, Users, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, Smile, Calendar, Play } from "lucide-react";
 import {
   useClips,
   useReactions,
@@ -148,6 +148,7 @@ function ClipRow({
       onClick={() => onOpenComments(clip.id)}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      title="クリックでコメントを開く（サムネイル＝動画再生、タイトル＝詳細ページ）"
     >
       <div className="cv-row-main" style={styles.rowMain}>
         <div
@@ -174,8 +175,10 @@ function ClipRow({
             padding: clip.thumbnail_url ? 0 : styles.thumb.padding,
             overflow: "hidden",
             border: "none",
+            position: "relative",
           }}
           aria-label={playerOpen ? "動画を閉じる" : "動画を再生"}
+          title={playerOpen ? "動画を閉じる" : "クリックでこの場で動画を再生"}
         >
           {clip.thumbnail_url ? (
             <img
@@ -186,13 +189,22 @@ function ClipRow({
           ) : (
             clip.game
           )}
+          {!playerOpen && (
+            <span style={styles.thumbPlayOverlay}>
+              <span style={styles.thumbPlayIcon}>
+                <Play size={12} fill="#14141B" color="#14141B" style={{ marginLeft: 1 }} />
+              </span>
+            </span>
+          )}
         </button>
 
         <div style={styles.infoCol}>
           <Link
             to={`/clips/${clip.id}`}
+            className="cv-clip-title-link"
             style={styles.clipTitleLink}
             onClick={(e) => e.stopPropagation()}
+            title="クリックで詳細ページを開く"
           >
             <p className="clip-title-font cv-clip-title" style={styles.clipTitle}>{clip.title}</p>
           </Link>
@@ -765,6 +777,7 @@ export default function ClipRanking() {
         }
         .cv-clip-thumb { width: 64px; height: 44px; }
         .cv-clip-title { font-size: 15px; }
+        .cv-clip-title-link:hover .cv-clip-title { text-decoration: underline; }
         @media (min-width: 901px) {
           .cv-clip-thumb { width: 132px; height: 74px; }
           .cv-clip-title { font-size: 19px; }
@@ -1427,6 +1440,24 @@ const styles = {
   },
   infoCol: { flex: 1, minWidth: 0 },
   clipTitleLink: { textDecoration: "none", color: "inherit" },
+  thumbPlayOverlay: {
+    position: "absolute",
+    inset: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "rgba(10,10,14,0.15)",
+  },
+  thumbPlayIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: "50%",
+    background: "rgba(255,255,255,0.92)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
   streamerLink: {
     color: "#EDEDF2",
     textDecoration: "none",
