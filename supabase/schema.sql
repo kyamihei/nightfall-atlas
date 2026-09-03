@@ -84,6 +84,17 @@ create table if not exists clip_reaction_stamps (
 
 create index if not exists idx_clip_reaction_stamps_clip on clip_reaction_stamps(clip_id);
 
+-- トップページのライブ活動フィード用にINSERTイベントをクライアントへ届ける（理由はcommentsの箇所と同じ）
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'clip_reaction_stamps'
+  ) then
+    alter publication supabase_realtime add table clip_reaction_stamps;
+  end if;
+end $$;
+
 -- 匿名コメント
 create table if not exists comments (
   id uuid primary key default gen_random_uuid(),

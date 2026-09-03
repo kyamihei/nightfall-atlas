@@ -16,6 +16,7 @@ import {
   useClipperRanks,
   useTopClippersByPeriod,
   useTrendingClips,
+  useActivityFeed,
 } from "../lib/use-clip-ranking";
 import { REACTIONS_ENABLED } from "../lib/feature-flags";
 import Footer from "./Footer";
@@ -508,6 +509,54 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
   );
 }
 
+/**
+ * トップページ上部に表示するライブ活動フィード。新着コメント/スタンプを1件ずつ順番に見せる
+ * ティッカー（「何かが常に動いている」状態を作りたいという要望で追加、2026-09-03）。
+ * 新着イベントが届いた瞬間はそれを即座に先頭表示し、以降は数秒おきに他の直近イベントも
+ * 巡回表示する。keyにitem.idを使うことで表示切り替えのたびにcv-fade-inを再生させている。
+ */
+function ActivityTicker({ items }) {
+  const [index, setIndex] = useState(0);
+  const prevLengthRef = useRef(0);
+
+  useEffect(() => {
+    if (items.length > prevLengthRef.current) {
+      setIndex(0); // 新着が来た瞬間はそれを見せる
+    }
+    prevLengthRef.current = items.length;
+  }, [items.length]);
+
+  useEffect(() => {
+    if (items.length <= 1) return;
+    const timer = setInterval(() => {
+      setIndex((i) => (i + 1) % items.length);
+    }, 4500);
+    return () => clearInterval(timer);
+  }, [items.length]);
+
+  if (items.length === 0) return null;
+  const item = items[index % items.length];
+
+  return (
+    <Link key={item.id} to={`/clips/${item.clipId}`} className="cv-fade-in" style={styles.activityTicker}>
+      <span className="cv-live-dot" style={styles.activityDot} />
+      <span style={styles.activityText}>
+        {item.type === "comment" ? (
+          <>
+            <MessageCircle size={13} style={{ marginRight: 4, verticalAlign: -2 }} />
+            <strong style={{ color: "#EDEDF2" }}>{item.displayName}</strong>さんが「{item.clipTitle}」にコメントしました
+          </>
+        ) : (
+          <>
+            <span style={{ marginRight: 4 }}>{item.stamp}</span>
+            「{item.clipTitle}」にスタンプが押されました
+          </>
+        )}
+      </span>
+    </Link>
+  );
+}
+
 const WEEKLY_RANK_ACCENTS = { 1: "#FFC857", 2: "#C9CEDA", 3: "#D98E5D" };
 
 /** トップページに表示する週間クリップ職人ランキング（直近7日間に作られたクリップの合計視聴回数順） */
@@ -597,6 +646,7 @@ export default function ClipRanking() {
     sortBy,
   );
   const { clips: trendingClips, loading: trendingLoading } = useTrendingClips(5, 72);
+  const { items: activityItems } = useActivityFeed(15);
 
   // ランキング欄とトレンド欄を同じ場所でタブ切り替え表示するため、リアクション/お気に入り/
   // スタンプ/アバター/クリッパー順位はどちらのタブに出てくるクリップIDもまとめて取得しておく
@@ -848,6 +898,8 @@ export default function ClipRanking() {
           </div>
         </div>
       </header>
+
+      <ActivityTicker items={activityItems} />
 
       <WeeklyClipperBoard clippers={weeklyClippers} loading={weeklyClippersLoading} />
 
@@ -1294,6 +1346,22 @@ const styles = {
     paddingTop: 10,
     borderTop: "1px solid #24242F",
   },
+  activityTicker: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    background: "#1C1C26",
+    border: "1px solid #24242F",
+    borderRadius: 8,
+    padding: "9px 14px",
+    marginBottom: 20,
+    textDecoration: "none",
+    color: "#9797A6",
+    fontSize: 12.5,
+    overflow: "hidden",
+  },
+  activityDot: { flexShrink: 0 },
+  activityText: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   weeklyBoard: {
     background: "#1C1C26",
     border: "1px solid #24242F",

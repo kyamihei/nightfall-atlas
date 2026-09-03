@@ -4,7 +4,7 @@
 // 置き換えるためのデータ層フック集。UIコンポーネント側の構造（clip-ranking-prototype.jsx）は
 // ほぼそのまま流用し、この層だけ差し替えるイメージ。
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase, ensureAnonymousSession, getAccessToken } from "./supabase-client";
 
 export interface Clip {
@@ -904,6 +904,155 @@ export function useTrendingClips(limit = 5, lookbackHours = 72) {
   }, [limit, lookbackHours]);
 
   return { clips, loading };
+}
+
+export interface ActivityFeedItem {
+  id: string;
+  type: "comment" | "stamp";
+  clipId: string;
+  clipTitle: string;
+  displayName?: string;
+  stamp?: string;
+  createdAt: string;
+}
+
+const ACTIVITY_FEED_EXCLUDED_CLIP_ID = "__general_thread__"; // 総合スレの番兵行は対象外にする
+
+/**
+ * トップページに表示するライブ活動フィード（新着コメント・リアクションスタンプをリアルタイムで
+ * 流すティッカー用）。「何かが常に動いている」サイトにしたいという要望で追加
+ * （2026-09-03）。マウント時に直近の投稿を初期表示分として取得し、以降はSupabase Realtimeの
+ * postgres_changes（INSERT）を購読してその場で先頭に追加する。
+ * クリップタイトルはcomments/clip_reaction_stamps側に持っていないため、clip_id→titleの
+ * 小さなキャッシュ（Ref）を使い、同じクリップへの連続投稿で毎回問い合わせないようにしている。
+ */
+export function useActivityFeed(limit = 15) {
+  const [items, setItems] = useState<ActivityFeedItem[]>([]);
+  const titleCacheRef = useRef(new Map<string, string>());
+
+  const resolveClipTitle = useCallback(async (clipId: string): Promise<string | null> => {
+    const cached = titleCacheRef.current.get(clipId);
+    if (cached) return cached;
+    const { data } = await supabase.from("clips").select("title").eq("id", clipId).maybeSingle();
+    if (!data) return null;
+    titleCacheRef.current.set(clipId, data.title);
+    return data.title;
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [{ data: recentComments }, { data: recentStamps }] = await Promise.all([
+        supabase
+          .from("comments")
+          .select("id, clip_id, display_name, created_at")
+          .neq("clip_id", ACTIVITY_FEED_EXCLUDED_CLIP_ID)
+          .order("created_at", { ascending: false })
+          .limit(limit),
+        supabase
+          .from("clip_reaction_stamps")
+          .select("clip_id, stamp, created_at")
+          .order("created_at", { ascending: false })
+          .limit(limit),
+      ]);
+      if (cancelled) return;
+
+      const clipIds = [
+        ...new Set([
+          ...(recentComments ?? []).map((c) => c.clip_id as string),
+          ...(recentStamps ?? []).map((s) => s.clip_id as string),
+        ]),
+      ];
+      if (clipIds.length === 0) return;
+
+      const { data: clips } = await supabase.from("clips").select("id, title").in("id", clipIds);
+      if (cancelled) return;
+      const titleMap = new Map((clips ?? []).map((c) => [c.id as string, c.title as string]));
+      titleMap.forEach((title, id) => titleCacheRef.current.set(id, title));
+
+      const commentItems: ActivityFeedItem[] = (recentComments ?? [])
+        .filter((c) => titleMap.has(c.clip_id as string))
+        .map((c) => ({
+          id: `comment-${c.id}`,
+          type: "comment" as const,
+          clipId: c.clip_id as string,
+          clipTitle: titleMap.get(c.clip_id as string)!,
+          displayName: c.display_name as string,
+          createdAt: c.created_at as string,
+        }));
+      const stampItems: ActivityFeedItem[] = (recentStamps ?? [])
+        .filter((s) => titleMap.has(s.clip_id as string))
+        .map((s) => ({
+          id: `stamp-${s.clip_id}-${s.stamp}-${s.created_at}`,
+          type: "stamp" as const,
+          clipId: s.clip_id as string,
+          clipTitle: titleMap.get(s.clip_id as string)!,
+          stamp: s.stamp as string,
+          createdAt: s.created_at as string,
+        }));
+
+      const merged = [...commentItems, ...stampItems]
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, limit);
+      setItems(merged);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [limit]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("activity-feed")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "comments" },
+        async (payload) => {
+          const row = payload.new as { id: string; clip_id: string; display_name: string; created_at: string };
+          if (row.clip_id === ACTIVITY_FEED_EXCLUDED_CLIP_ID) return;
+          const title = await resolveClipTitle(row.clip_id);
+          if (!title) return;
+          setItems((prev) => [
+            {
+              id: `comment-${row.id}`,
+              type: "comment",
+              clipId: row.clip_id,
+              clipTitle: title,
+              displayName: row.display_name,
+              createdAt: row.created_at,
+            },
+            ...prev,
+          ].slice(0, limit));
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "clip_reaction_stamps" },
+        async (payload) => {
+          const row = payload.new as { clip_id: string; stamp: string; created_at: string };
+          const title = await resolveClipTitle(row.clip_id);
+          if (!title) return;
+          setItems((prev) => [
+            {
+              id: `stamp-${row.clip_id}-${row.stamp}-${row.created_at}`,
+              type: "stamp",
+              clipId: row.clip_id,
+              clipTitle: title,
+              stamp: row.stamp,
+              createdAt: row.created_at,
+            },
+            ...prev,
+          ].slice(0, limit));
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [limit, resolveClipTitle]);
+
+  return { items };
 }
 
 /**

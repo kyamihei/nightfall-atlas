@@ -290,6 +290,26 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   既存パターンに倣って`lucide-react`のアイコンを使うこと**（スタンプ名自体の文字列「すっご」等は
   絵文字ではなくテキストなので対象外）。
 
+## ライブ活動フィード（トップページのティッカー、2026-09-03追加）
+
+- 「サイトに動いているものが何もなく寂しい」というデザイン面の指摘への対応。単なる装飾アニメーション
+  ではなく、実際のコメント・リアクションスタンプ投稿にSupabase Realtimeで連動する
+  「ライブ活動フィード」をヘッダー直下に追加（`ClipRanking.jsx`の`ActivityTicker`、
+  データ層は`use-clip-ranking.ts`の`useActivityFeed`フック）。
+- マウント時に直近のコメント・スタンプを`comments`/`clip_reaction_stamps`から新しい順に取得して
+  初期表示分にし、以降は`postgres_changes`（INSERT、フィルタ無し＝全クリップ対象）を購読して
+  新着が来るたびに先頭へ追加。表示は1件ずつ約4.5秒おきに巡回し、新着が来た瞬間はそれを
+  即座に先頭表示する。クリップタイトルはcomments/clip_reaction_stamps側に持っていないため、
+  clip_id→titleの小さなキャッシュ（useRef）を使って都度の問い合わせを減らしている。
+  総合スレの番兵行（`__general_thread__`）はフィード対象から除外。
+- **ハマった点**: `comments`テーブルは既にrealtime publicationに入っていたが、
+  `clip_reaction_stamps`テーブルは入っておらず、そのままではINSERTイベントが一切届かなかった。
+  `alter publication supabase_realtime add table clip_reaction_stamps`を追加するマイグレーション
+  （`20260903090000_activity_feed_realtime.sql`）で解決。**新しいテーブルでpostgres_changes購読を
+  使う際は、テーブル追加時にrealtime publicationへの追加を忘れないこと**（`comments`は
+  `20260901020000_enable_realtime_comments.sql`で対応済みだったため見落としやすい）。
+  本番相手にSQLを直接INSERTしてブラウザ側に即座に反映されることを確認済み（テストデータは削除済み）。
+
 ## 独自ドメイン移行（kurisure.jp）・ファビコン刷新・基本SEO対応（2026-09-03追加）
 
 - 独自ドメイン`https://kurisure.jp`をVercelプロジェクト（`clip-vote`）に追加し、稼働確認済み
