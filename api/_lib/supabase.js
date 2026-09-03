@@ -17,3 +17,32 @@ export async function supabaseGet(path) {
   if (!res.ok) return null;
   return res.json();
 }
+
+const PAGE_SIZE = 1000;
+
+/**
+ * PostgRESTのプロジェクト側デフォルト行数上限（1000件、クエリ文字列のlimit=Nでは超えられない、
+ * 詳細はCLAUDE.md「最新クリップ反映の高速化」節）を超えて取得するためのRangeヘッダーによる
+ * ページング。path例: "clips?select=id&order=view_count.desc"（limitは付けない）
+ */
+export async function supabaseGetPaged(path, totalLimit) {
+  const all = [];
+  let offset = 0;
+  while (all.length < totalLimit) {
+    const pageSize = Math.min(PAGE_SIZE, totalLimit - all.length);
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        Range: `${offset}-${offset + pageSize - 1}`,
+      },
+    });
+    if (!res.ok && res.status !== 206) break;
+    const page = await res.json();
+    if (!Array.isArray(page) || page.length === 0) break;
+    all.push(...page);
+    if (page.length < pageSize) break;
+    offset += pageSize;
+  }
+  return all;
+}
