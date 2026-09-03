@@ -587,6 +587,32 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
 - GitHub Actions Secrets: `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `TARGET_GAME_IDS`
 - 元のセットアップ手順・秘密値は親ディレクトリ（`C:\clip-vote`）の `CLAUDE_CODE_INSTRUCTIONS.md` と `.env.human-provided` を参照（このリポジトリには含まれない）
 
+## 簡易管理画面（`/admin`、2026-09-03追加）
+
+- 「問い合わせ確認をSQL直打ちでやっているのが面倒」というニーズへの対応。`contact_messages`・
+  `comment_reports`・`broadcaster_requests`の3つを1画面で確認・一部操作できる管理画面を追加した
+  （`src/components/AdminPage.jsx`、データ層は`src/lib/use-admin.ts`）。**どのナビにもリンクしていない**
+  （URLを直接知っている運営だけが使う想定、意図的な設計）。
+- サイトにアカウント認証システムが無いため、簡易的にパスワードゲート方式にした。パスワードは
+  Supabase Vaultに保存（`vault.create_secret(..., 'admin_panel_password', ...)`、平文はgit管理外）し、
+  `security definer`のRPC（`admin_verify_password`でログイン確認、`admin_get_*`/`admin_set_*`で
+  各テーブルの取得・更新）が呼び出しのたびにDB側で照合する方式（`supabase/migrations/
+  20260903150000_admin_panel.sql`）。対象3テーブルはいずれも「本人以外閲覧不可」のRLSのため、
+  通常のテーブルアクセスでは管理者でも読めず、必ずこのRPC経由になる。
+  - フロント側はパスワードを`sessionStorage`に保持するだけの簡易セッション（`useAdminAuth`）。
+  - できる操作: お問い合わせの既読/未読切り替え、通報されたコメントの非表示/表示切り替え、
+    配信者登録リクエスト履歴の閲覧（承認/却下は既存の`request-broadcaster`のフローのまま、
+    ここでは変更しない）。
+- **ハマった点**: `useAdminAuth()`をログインフォーム（`LoginForm`）と親（`AdminPage`）の両方で
+  それぞれ個別に呼び出していたところ、Reactのカスタムフックは呼び出し箇所ごとに別々の`useState`
+  インスタンスを持つため、ログインフォーム側でログインに成功してもその状態が親に伝わらず、
+  画面がログインフォームのまま変化しない（エラー表示も無い）という不具合になった。`useAdminAuth()`の
+  呼び出しを`AdminPage`側の1箇所だけにし、`login`/`verifying`/`error`をpropsで`LoginForm`に渡す形に
+  修正して解決。**同じカスタムフックを親・子の両方で個別に呼ぶと状態が分裂する**という、
+  今後別の機能でも起こりうる罠として記録しておく。
+- ブラウザで実機確認済み（ログイン→お問い合わせの既読切り替え→コメント通報の非表示切り替え→
+  配信者リクエストの空状態表示、まで一通り確認）。
+
 # ステアリング
 
 - git commitを行う際は、同じタイミングでリモート（origin）へのpushも必ず行うこと。ユーザーから別途pushを依頼されるのを待たない。
