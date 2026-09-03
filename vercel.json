@@ -18,5 +18,8 @@
       "destination": "https://kurisure.jp/:path*",
       "permanent": true
     }
+  ],
+  "rewrites": [
+    { "source": "/((?!.*\\..*).*)", "destination": "/index.html" }
   ]
 }
