@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, Users, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, Smile } from "lucide-react";
+import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, Users, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, Smile, Calendar } from "lucide-react";
 import {
   useClips,
   useReactions,
@@ -112,6 +112,7 @@ function ClipRow({
   onCommentsUpdate,
   avatarUrl,
   clipperRank,
+  trendingViewsPerHour,
 }) {
   // このクリップのコメント購読はここ1箇所のみで行い、サイドパネル用のデータは
   // onCommentsUpdate経由で親に伝える（同一clipへの二重購読はSupabase Realtimeがエラーになるため）
@@ -209,6 +210,7 @@ function ClipRow({
               {clip.streamer}
             </Link>
             {" ・ ▶ "}{formatViews(clip.view_count)}回視聴
+            {trendingViewsPerHour != null && ` ・ 時間あたり${formatViews(Math.round(trendingViewsPerHour))}回`}
           </p>
           {clip.creator_id && (
             <Link
@@ -547,47 +549,6 @@ function WeeklyClipperBoard({ clippers, loading }) {
   );
 }
 
-/**
- * いまトレンドのクリップ（直近72時間以内に作られ、作成からの経過時間あたりの視聴回数が多いクリップ）。
- * view_countの時系列履歴を持っていないため、この「経過時間あたりの視聴回数」を伸び方の代理指標にしている
- * （詳細はget_trending_clips RPCのコメント参照）。
- */
-function TrendingBoard({ clips, loading }) {
-  if (!loading && clips.length === 0) return null;
-
-  return (
-    <div style={styles.weeklyBoard}>
-      <div style={styles.weeklyBoardHeader}>
-        <p style={styles.weeklyBoardTitle}>
-          <TrendingUp size={14} style={{ marginRight: 6, verticalAlign: -2 }} color="#FF4D6D" />
-          いまトレンド
-        </p>
-      </div>
-      <div style={styles.weeklyBoardList}>
-        {loading
-          ? Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="cv-skeleton" style={styles.trendingChipSkeleton} />
-            ))
-          : clips.map((clip) => (
-              <Link key={clip.id} to={`/clips/${clip.id}`} style={styles.trendingChip}>
-                <div style={styles.trendingChipThumb}>
-                  {clip.thumbnail_url ? (
-                    <img src={clip.thumbnail_url} alt="" style={styles.trendingChipThumbImg} />
-                  ) : (
-                    <span style={styles.trendingChipThumbFallback}>{clip.game}</span>
-                  )}
-                </div>
-                <span style={styles.weeklyChipInfo}>
-                  <span style={{ ...styles.weeklyChipName, maxWidth: 150 }}>{clip.title}</span>
-                  <span style={styles.weeklyChipViews}>{clip.streamer} ・ 時間あたり{formatViews(Math.round(clip.views_per_hour))}回視聴</span>
-                </span>
-              </Link>
-            ))}
-      </div>
-    </div>
-  );
-}
-
 /** 読み込み中に表示するクリップ行の骨組み（レイアウトのガタつきを防ぐ） */
 function SkeletonRow({ delay }) {
   return (
@@ -623,7 +584,16 @@ export default function ClipRanking() {
     page,
     sortBy,
   );
-  const clipIds = useMemo(() => clips.map((c) => c.id), [clips]);
+  const { clips: trendingClips, loading: trendingLoading } = useTrendingClips(5, 72);
+
+  // ランキング欄とトレンド欄を同じ場所でタブ切り替え表示するため、リアクション/お気に入り/
+  // スタンプ/アバター/クリッパー順位はどちらのタブに出てくるクリップIDもまとめて取得しておく
+  // （タブを切り替えるたびに読み込み直すと表示がちらつくため）。
+  const clipIds = useMemo(() => {
+    const ids = new Set(clips.map((c) => c.id));
+    trendingClips.forEach((c) => ids.add(c.id));
+    return [...ids];
+  }, [clips, trendingClips]);
   const { counts, myVotes, vote } = useReactions(clipIds);
   const { favoritedIds, toggle: toggleFavoriteRaw } = useFavorites(clipIds);
   const { counts: favoriteCounts, refresh: refreshFavoriteCounts } = useFavoriteCounts(clipIds);
@@ -635,9 +605,17 @@ export default function ClipRanking() {
     [toggleFavoriteRaw, refreshFavoriteCounts],
   );
   const { counts: stampCounts, myStamps, toggle: toggleStamp } = useClipStamps(clipIds);
-  const streamerNames = useMemo(() => [...new Set(clips.map((c) => c.streamer))], [clips]);
+  const streamerNames = useMemo(() => {
+    const names = new Set(clips.map((c) => c.streamer));
+    trendingClips.forEach((c) => names.add(c.streamer));
+    return [...names];
+  }, [clips, trendingClips]);
   const avatars = useBroadcasterAvatars(streamerNames);
-  const creatorIds = useMemo(() => clips.map((c) => c.creator_id), [clips]);
+  const creatorIds = useMemo(() => {
+    const ids = new Set(clips.map((c) => c.creator_id));
+    trendingClips.forEach((c) => ids.add(c.creator_id));
+    return [...ids];
+  }, [clips, trendingClips]);
   const clipperRanks = useClipperRanks(creatorIds);
 
   // 週間クリップ職人ランキング（トップページ表示用）。7日間の範囲はマウント時に1度だけ固定し、
@@ -652,7 +630,6 @@ export default function ClipRanking() {
     weekRange.end,
     5,
   );
-  const { clips: trendingClips, loading: trendingLoading } = useTrendingClips(5, 72);
 
   const [activeCommentClipId, setActiveCommentClipId] = useState(null);
   const [commentsDataByClip, setCommentsDataByClip] = useState({});
@@ -660,6 +637,61 @@ export default function ClipRanking() {
   const [searchQuery, setSearchQuery] = useState("");
   const [requestDraft, setRequestDraft] = useState("");
   const [reportedIds, setReportedIds] = useState(new Set());
+
+  // ランキング欄／トレンド欄のタブ切り替え。slideDirは切り替え時のスライド方向
+  // （タブクリックでは並び順から、スワイプでは指の動きから決める）。
+  const VIEW_TABS = ["ranking", "trending"];
+  const [activeView, setActiveView] = useState("ranking");
+  const [slideDir, setSlideDir] = useState("right");
+  const touchStartXRef = useRef(null);
+
+  function switchView(next) {
+    setActiveView((prev) => {
+      if (prev === next) return prev;
+      setSlideDir(VIEW_TABS.indexOf(next) > VIEW_TABS.indexOf(prev) ? "right" : "left");
+      return next;
+    });
+  }
+
+  function handleViewTouchStart(e) {
+    touchStartXRef.current = e.touches[0].clientX;
+  }
+
+  function handleViewTouchEnd(e) {
+    if (touchStartXRef.current === null) return;
+    const deltaX = e.changedTouches[0].clientX - touchStartXRef.current;
+    touchStartXRef.current = null;
+    if (deltaX < -50) switchView("trending");
+    else if (deltaX > 50) switchView("ranking");
+  }
+
+  // 期間指定欄はボタン1つに畳み、押したときだけ選択肢を開く。外側クリックで閉じる。
+  const [periodPickerOpen, setPeriodPickerOpen] = useState(false);
+  const periodPickerRef = useRef(null);
+
+  useEffect(() => {
+    if (!periodPickerOpen) return;
+    function handleClickOutside(e) {
+      if (periodPickerRef.current && !periodPickerRef.current.contains(e.target)) {
+        setPeriodPickerOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [periodPickerOpen]);
+
+  function handlePeriodSelect(value) {
+    setPeriod(value);
+    if (value !== "day") setPeriodPickerOpen(false);
+  }
+
+  function handleDaySelect(d) {
+    setSelectedDay(d);
+    setPeriodPickerOpen(false);
+  }
+
+  const periodButtonLabel =
+    period === "day" ? formatDayLabel(selectedDay) : PERIOD_TABS.find((t) => t.value === period)?.label ?? "";
 
   const { results: broadcasterResults, searching: broadcasterSearching } = useBroadcasterSearch(searchQuery);
   const { request: requestBroadcaster, submitting: requesting, result: requestResult } = useBroadcasterRequest();
@@ -712,6 +744,7 @@ export default function ClipRanking() {
     return true;
   });
   const showNoResultRequest = searchQuery.trim() && visibleClips.length === 0;
+  const trendingRanked = trendingClips.map((c, i) => ({ ...c, rank: i + 1 }));
 
   return (
     <div style={styles.page}>
@@ -802,169 +835,260 @@ export default function ClipRanking() {
         </div>
       </header>
 
-      <TrendingBoard clips={trendingClips} loading={trendingLoading} />
       <WeeklyClipperBoard clippers={weeklyClippers} loading={weeklyClippersLoading} />
 
-      <div className="cv-ranking-controls" style={styles.rankingControlsRow}>
-        <div style={styles.periodTabs}>
-          {PERIOD_TABS.map((t) => (
-            <button
-              key={t.value}
-              onClick={() => setPeriod(t.value)}
-              style={period === t.value ? styles.tabActive : styles.tab}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-        <select
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value)}
-          style={styles.sortSelect}
-          aria-label="並び替え"
+      <div style={styles.viewTabsRow}>
+        <button
+          onClick={() => switchView("ranking")}
+          style={activeView === "ranking" ? styles.viewTabActive : styles.viewTab}
         >
-          {SORT_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
+          <ListChecks size={14} />
+          ランキング
+        </button>
+        <button
+          onClick={() => switchView("trending")}
+          style={activeView === "trending" ? styles.viewTabActive : styles.viewTab}
+        >
+          <TrendingUp size={14} />
+          いまトレンド
+        </button>
       </div>
 
-      {period === "day" && (
-        <div style={styles.dayTabs}>
-          {getLastSevenDays().map((d) => (
-            <button
-              key={d.toDateString()}
-              onClick={() => setSelectedDay(d)}
-              style={isSameDay(d, selectedDay) ? styles.tabActive : styles.tab}
-            >
-              {formatDayLabel(d)}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {clipsError && <div style={styles.errorBanner}>{clipsError}</div>}
-
-      <div style={styles.list}>
-        {loading && (
+      <div
+        key={activeView}
+        className={slideDir === "right" ? "cv-slide-in-from-right" : "cv-slide-in-from-left"}
+        onTouchStart={handleViewTouchStart}
+        onTouchEnd={handleViewTouchEnd}
+      >
+        {activeView === "ranking" ? (
           <>
-            {Array.from({ length: 6 }).map((_, i) => (
-              <SkeletonRow key={i} delay={i * 40} />
-            ))}
-          </>
-        )}
-        {!loading && visibleClips.length === 0 && !showNoResultRequest && (
-          <div style={styles.emptyState}>
-            <Film size={26} color="#3E3E4A" style={{ marginBottom: 10 }} />
-            <p style={{ margin: 0 }}>まだクリップがありません。</p>
-          </div>
-        )}
-        {!loading && showNoResultRequest && (
-          <div style={styles.requestCard}>
-            <div style={styles.requestHead}>
-              <UserPlus size={16} color="#FF4D6D" />
-              <p style={styles.requestTitle}>「{searchQuery}」に一致する配信者は見つかりませんでした</p>
-            </div>
-            {broadcasterSearching ? (
-              <p style={{ ...styles.requestSub, display: "flex", alignItems: "center", gap: 6 }}>
-                <Loader2 size={13} style={{ animation: "cv-spin 1s linear infinite" }} />
-                検索中…
-              </p>
-            ) : broadcasterResults.length > 0 ? (
-              <p style={styles.requestSub}>
-                「{searchQuery}」は登録済みの配信者です。現在ランキング対象のクリップはありません。
-              </p>
-            ) : (
-              <>
-                <p style={styles.requestSub}>
-                  まだ登録されていない配信者かもしれません。Twitchのチャンネル名を入力してリクエストできます。
-                </p>
-                <div style={styles.requestForm}>
-                  <input
-                    value={requestDraft}
-                    onChange={(e) => setRequestDraft(e.target.value)}
-                    placeholder="Twitchのチャンネル名（例: shroud）"
-                    style={styles.requestInput}
-                    maxLength={30}
-                  />
-                  <button onClick={handleBroadcasterRequest} style={styles.requestBtn} disabled={requesting}>
-                    {requesting ? "送信中…" : "登録をリクエスト"}
-                  </button>
-                </div>
-                {requestResult && (
-                  <p
+            <div className="cv-ranking-controls" style={styles.rankingControlsRow}>
+              <div ref={periodPickerRef} style={styles.periodPickerWrap}>
+                <button
+                  onClick={() => setPeriodPickerOpen((o) => !o)}
+                  style={styles.periodPickerBtn}
+                  aria-expanded={periodPickerOpen}
+                >
+                  <Calendar size={13} />
+                  {periodButtonLabel}
+                  <ChevronDown
+                    size={13}
                     style={{
-                      ...styles.requestMessage,
-                      color: requestResult.ok ? "#5DCAA5" : "#F0997B",
+                      transform: periodPickerOpen ? "rotate(180deg)" : "none",
+                      transition: "transform 0.15s ease",
                     }}
-                  >
-                    {requestResult.message}
-                  </p>
+                  />
+                </button>
+                {periodPickerOpen && (
+                  <div className="cv-fade-in" style={styles.periodPickerPanel}>
+                    <div style={styles.periodPickerTabs}>
+                      {PERIOD_TABS.map((t) => (
+                        <button
+                          key={t.value}
+                          onClick={() => handlePeriodSelect(t.value)}
+                          style={period === t.value ? styles.tabActive : styles.tab}
+                        >
+                          {t.label}
+                        </button>
+                      ))}
+                    </div>
+                    {period === "day" && (
+                      <div style={styles.periodPickerDays}>
+                        {getLastSevenDays().map((d) => (
+                          <button
+                            key={d.toDateString()}
+                            onClick={() => handleDaySelect(d)}
+                            style={isSameDay(d, selectedDay) ? styles.tabActive : styles.tab}
+                          >
+                            {formatDayLabel(d)}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 )}
-                <p style={styles.requestNote}>
-                  ※ Twitch APIで実在確認が取れた配信者のみ自動的にランキングへ反映されます。
-                </p>
+              </div>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                style={styles.sortSelect}
+                aria-label="並び替え"
+              >
+                {SORT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {clipsError && <div style={styles.errorBanner}>{clipsError}</div>}
+
+            <div style={styles.list}>
+              {loading && (
+                <>
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <SkeletonRow key={i} delay={i * 40} />
+                  ))}
+                </>
+              )}
+              {!loading && visibleClips.length === 0 && !showNoResultRequest && (
+                <div style={styles.emptyState}>
+                  <Film size={26} color="#3E3E4A" style={{ marginBottom: 10 }} />
+                  <p style={{ margin: 0 }}>まだクリップがありません。</p>
+                </div>
+              )}
+              {!loading && showNoResultRequest && (
+                <div style={styles.requestCard}>
+                  <div style={styles.requestHead}>
+                    <UserPlus size={16} color="#FF4D6D" />
+                    <p style={styles.requestTitle}>「{searchQuery}」に一致する配信者は見つかりませんでした</p>
+                  </div>
+                  {broadcasterSearching ? (
+                    <p style={{ ...styles.requestSub, display: "flex", alignItems: "center", gap: 6 }}>
+                      <Loader2 size={13} style={{ animation: "cv-spin 1s linear infinite" }} />
+                      検索中…
+                    </p>
+                  ) : broadcasterResults.length > 0 ? (
+                    <p style={styles.requestSub}>
+                      「{searchQuery}」は登録済みの配信者です。現在ランキング対象のクリップはありません。
+                    </p>
+                  ) : (
+                    <>
+                      <p style={styles.requestSub}>
+                        まだ登録されていない配信者かもしれません。Twitchのチャンネル名を入力してリクエストできます。
+                      </p>
+                      <div style={styles.requestForm}>
+                        <input
+                          value={requestDraft}
+                          onChange={(e) => setRequestDraft(e.target.value)}
+                          placeholder="Twitchのチャンネル名（例: shroud）"
+                          style={styles.requestInput}
+                          maxLength={30}
+                        />
+                        <button onClick={handleBroadcasterRequest} style={styles.requestBtn} disabled={requesting}>
+                          {requesting ? "送信中…" : "登録をリクエスト"}
+                        </button>
+                      </div>
+                      {requestResult && (
+                        <p
+                          style={{
+                            ...styles.requestMessage,
+                            color: requestResult.ok ? "#5DCAA5" : "#F0997B",
+                          }}
+                        >
+                          {requestResult.message}
+                        </p>
+                      )}
+                      <p style={styles.requestNote}>
+                        ※ Twitch APIで実在確認が取れた配信者のみ自動的にランキングへ反映されます。
+                      </p>
+                    </>
+                  )}
+                </div>
+              )}
+              {!loading &&
+                visibleClips.map((clip) => {
+                  const stats = counts[clip.id] || { likes: 0, dislikes: 0 };
+                  return (
+                    <ClipRow
+                      key={clip.id}
+                      clip={clip}
+                      likes={stats.likes}
+                      dislikes={stats.dislikes}
+                      myVote={myVotes[clip.id]}
+                      onVote={vote}
+                      isFavorited={favoritedIds.has(clip.id)}
+                      onToggleFavorite={toggleFavorite}
+                      favoriteCount={favoriteCounts[clip.id] || 0}
+                      stampCounts={stampCounts[clip.id]}
+                      myStamps={myStamps[clip.id]}
+                      onToggleStamp={toggleStamp}
+                      commentsActive={activeCommentClipId === clip.id}
+                      onOpenComments={toggleComments}
+                      onCommentsUpdate={handleCommentsUpdate}
+                      avatarUrl={avatars[clip.streamer]}
+                      clipperRank={clip.creator_id ? clipperRanks[clip.creator_id] : undefined}
+                    />
+                  );
+                })}
+            </div>
+
+            {!loading && !searchQuery.trim() && totalCount > PAGE_SIZE && (
+              <div style={styles.pagination}>
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                  style={{ ...styles.pageBtn, opacity: page <= 1 ? 0.4 : 1 }}
+                  aria-label="前のページ"
+                >
+                  <ChevronLeft size={15} />
+                </button>
+                <span style={styles.pageInfo}>
+                  {page} / {Math.ceil(totalCount / PAGE_SIZE)}
+                </span>
+                <button
+                  onClick={() => setPage((p) => (p * PAGE_SIZE < totalCount ? p + 1 : p))}
+                  disabled={page * PAGE_SIZE >= totalCount}
+                  style={{ ...styles.pageBtn, opacity: page * PAGE_SIZE >= totalCount ? 0.4 : 1 }}
+                  aria-label="次のページ"
+                >
+                  <ChevronRight size={15} />
+                </button>
+              </div>
+            )}
+          </>
+        ) : (
+          <div style={styles.list}>
+            {trendingLoading && (
+              <>
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <SkeletonRow key={i} delay={i * 40} />
+                ))}
               </>
             )}
+            {!trendingLoading && trendingRanked.length === 0 && (
+              <div style={styles.emptyState}>
+                <TrendingUp size={26} color="#3E3E4A" style={{ marginBottom: 10 }} />
+                <p style={{ margin: 0 }}>直近72時間以内に伸びているクリップはまだありません。</p>
+              </div>
+            )}
+            {!trendingLoading &&
+              trendingRanked.map((clip) => {
+                const stats = counts[clip.id] || { likes: 0, dislikes: 0 };
+                return (
+                  <ClipRow
+                    key={clip.id}
+                    clip={clip}
+                    likes={stats.likes}
+                    dislikes={stats.dislikes}
+                    myVote={myVotes[clip.id]}
+                    onVote={vote}
+                    isFavorited={favoritedIds.has(clip.id)}
+                    onToggleFavorite={toggleFavorite}
+                    favoriteCount={favoriteCounts[clip.id] || 0}
+                    stampCounts={stampCounts[clip.id]}
+                    myStamps={myStamps[clip.id]}
+                    onToggleStamp={toggleStamp}
+                    commentsActive={activeCommentClipId === clip.id}
+                    onOpenComments={toggleComments}
+                    onCommentsUpdate={handleCommentsUpdate}
+                    avatarUrl={avatars[clip.streamer]}
+                    clipperRank={clip.creator_id ? clipperRanks[clip.creator_id] : undefined}
+                    trendingViewsPerHour={clip.views_per_hour}
+                  />
+                );
+              })}
           </div>
         )}
-        {!loading &&
-          visibleClips.map((clip) => {
-            const stats = counts[clip.id] || { likes: 0, dislikes: 0 };
-            return (
-              <ClipRow
-                key={clip.id}
-                clip={clip}
-                likes={stats.likes}
-                dislikes={stats.dislikes}
-                myVote={myVotes[clip.id]}
-                onVote={vote}
-                isFavorited={favoritedIds.has(clip.id)}
-                onToggleFavorite={toggleFavorite}
-                favoriteCount={favoriteCounts[clip.id] || 0}
-                stampCounts={stampCounts[clip.id]}
-                myStamps={myStamps[clip.id]}
-                onToggleStamp={toggleStamp}
-                commentsActive={activeCommentClipId === clip.id}
-                onOpenComments={toggleComments}
-                onCommentsUpdate={handleCommentsUpdate}
-                avatarUrl={avatars[clip.streamer]}
-                clipperRank={clip.creator_id ? clipperRanks[clip.creator_id] : undefined}
-              />
-            );
-          })}
       </div>
-
-      {!loading && !searchQuery.trim() && totalCount > PAGE_SIZE && (
-        <div style={styles.pagination}>
-          <button
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page <= 1}
-            style={{ ...styles.pageBtn, opacity: page <= 1 ? 0.4 : 1 }}
-            aria-label="前のページ"
-          >
-            <ChevronLeft size={15} />
-          </button>
-          <span style={styles.pageInfo}>
-            {page} / {Math.ceil(totalCount / PAGE_SIZE)}
-          </span>
-          <button
-            onClick={() => setPage((p) => (p * PAGE_SIZE < totalCount ? p + 1 : p))}
-            disabled={page * PAGE_SIZE >= totalCount}
-            style={{ ...styles.pageBtn, opacity: page * PAGE_SIZE >= totalCount ? 0.4 : 1 }}
-            aria-label="次のページ"
-          >
-            <ChevronRight size={15} />
-          </button>
-        </div>
-      )}
 
       <Footer note="お気に入り・コメントはすべてのブラウザで共有されます。" />
 
       {activeCommentClipId && (() => {
-        const activeClip = clips.find((c) => c.id === activeCommentClipId);
+        const activeClip =
+          clips.find((c) => c.id === activeCommentClipId) ??
+          trendingClips.find((c) => c.id === activeCommentClipId);
         if (!activeClip) return null;
         return (
           <>
@@ -1079,7 +1203,6 @@ const styles = {
     gap: 10,
     marginBottom: 16,
   },
-  periodTabs: { display: "flex", flexWrap: "wrap", gap: 6 },
   sortSelect: {
     background: "#1C1C26",
     border: "1px solid #2E2E3A",
@@ -1088,7 +1211,65 @@ const styles = {
     padding: "6px 10px",
     fontSize: 12.5,
   },
-  dayTabs: { display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 16 },
+  viewTabsRow: { display: "flex", gap: 8, marginBottom: 16 },
+  viewTab: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    background: "transparent",
+    border: "1px solid #2E2E3A",
+    color: "#8A8A99",
+    borderRadius: 20,
+    padding: "8px 16px",
+    fontSize: 13.5,
+    fontWeight: 500,
+  },
+  viewTabActive: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    background: "#FF4D6D14",
+    border: "1px solid #FF4D6D55",
+    color: "#EDEDF2",
+    borderRadius: 20,
+    padding: "8px 16px",
+    fontSize: 13.5,
+    fontWeight: 600,
+  },
+  periodPickerWrap: { position: "relative" },
+  periodPickerBtn: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 7,
+    background: "#1C1C26",
+    border: "1px solid #2E2E3A",
+    color: "#C4C4D0",
+    borderRadius: 8,
+    padding: "7px 12px",
+    fontSize: 13,
+    fontWeight: 500,
+  },
+  periodPickerPanel: {
+    position: "absolute",
+    top: "calc(100% + 8px)",
+    left: 0,
+    zIndex: 20,
+    background: "#1C1C26",
+    border: "1px solid #2E2E3A",
+    borderRadius: 10,
+    padding: 12,
+    boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+    minWidth: 240,
+  },
+  periodPickerTabs: { display: "flex", flexWrap: "wrap", gap: 6 },
+  periodPickerDays: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 10,
+    paddingTop: 10,
+    borderTop: "1px solid #24242F",
+  },
   weeklyBoard: {
     background: "#1C1C26",
     border: "1px solid #24242F",
@@ -1140,34 +1321,6 @@ const styles = {
   },
   weeklyChipViews: { fontSize: 11, color: "#6B6B78" },
   weeklyChipSkeleton: { width: 160, height: 42, borderRadius: 8, flexShrink: 0 },
-  trendingChip: {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    background: "#20202B",
-    border: "1px solid #2E2E3A",
-    borderRadius: 8,
-    padding: "8px 12px",
-    textDecoration: "none",
-    color: "#EDEDF2",
-    flexShrink: 0,
-    minWidth: 220,
-    maxWidth: 220,
-  },
-  trendingChipThumb: {
-    width: 40,
-    height: 28,
-    borderRadius: 5,
-    overflow: "hidden",
-    flexShrink: 0,
-    background: "#2A2A36",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  trendingChipThumbImg: { width: "100%", height: "100%", objectFit: "cover" },
-  trendingChipThumbFallback: { fontSize: 7, color: "#8A8A99", textAlign: "center" },
-  trendingChipSkeleton: { width: 220, height: 44, borderRadius: 8, flexShrink: 0 },
   pagination: {
     display: "flex",
     alignItems: "center",

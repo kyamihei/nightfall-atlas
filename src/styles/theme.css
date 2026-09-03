@@ -150,6 +150,37 @@ button:disabled {
   animation: cv-slide-in-right 0.25s ease both;
 }
 
+/* ランキング/トレンドのタブ切り替え（スワイプ・クリック共通）で使うスライド演出 */
+@keyframes cv-slide-in-from-right {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes cv-slide-in-from-left {
+  from {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.cv-slide-in-from-right {
+  animation: cv-slide-in-from-right 0.25s ease both;
+}
+
+.cv-slide-in-from-left {
+  animation: cv-slide-in-from-left 0.25s ease both;
+}
+
 .cv-live-dot {
   animation: cv-live-pulse 1.6s ease-in-out infinite;
 }
