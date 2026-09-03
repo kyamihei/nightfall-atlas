@@ -33,6 +33,9 @@ alter table clips add column if not exists creator_name text;
 alter table clips add column if not exists view_count_synced_at timestamptz;
 create index if not exists idx_clips_view_count_synced_at on clips(view_count_synced_at nulls first);
 
+-- ライブ活動フィードの「新着クリップ」枠（created_at降順で取得）用
+create index if not exists idx_clips_created_at on clips(created_at desc);
+
 create index if not exists idx_clips_period_ranking
   on clips(twitch_created_at desc, view_count desc);
 

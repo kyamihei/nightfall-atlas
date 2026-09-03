@@ -908,15 +908,17 @@ export function useTrendingClips(limit = 5, lookbackHours = 72) {
 
 export interface ActivityFeedItem {
   id: string;
-  type: "comment" | "stamp";
+  type: "comment" | "stamp" | "new_clip";
   clipId: string;
   clipTitle: string;
   displayName?: string;
   stamp?: string;
+  streamer?: string;
   createdAt: string;
 }
 
 const ACTIVITY_FEED_EXCLUDED_CLIP_ID = "__general_thread__"; // 総合スレの番兵行は対象外にする
+const NEW_CLIP_REFRESH_INTERVAL_MS = 3 * 60 * 1000; // 新着クリップ枠の再取得間隔
 
 /**
  * トップページに表示するライブ活動フィード（新着コメント・リアクションスタンプをリアルタイムで
@@ -925,6 +927,13 @@ const ACTIVITY_FEED_EXCLUDED_CLIP_ID = "__general_thread__"; // 総合スレの�
  * postgres_changes（INSERT）を購読してその場で先頭に追加する。
  * クリップタイトルはcomments/clip_reaction_stamps側に持っていないため、clip_id→titleの
  * 小さなキャッシュ（Ref）を使い、同じクリップへの連続投稿で毎回問い合わせないようにしている。
+ *
+ * コメント/スタンプはPVが少ないとほとんど発生せず、フィードが寂しくなってしまう
+ * （2026-09-03、ユーザー指摘）ため、clipsテーブルへの新規追加（日次の全体同期・15分おきの
+ * ライブ同期で常に流れ込んでくる本物のデータ）も「clip_id→タイトルが確定済み」という
+ * 空でも困らない予備枠として混ぜている。3分おきに再取得して、時間が経ってもフィードが
+ * 枯れないようにする（新規クリップはRealtime購読ではなく定期取得: バルクupsertのたびに
+ * 大量のINSERTイベントが一気に届くのを避けるため）。
  */
 export function useActivityFeed(limit = 15) {
   const [items, setItems] = useState<ActivityFeedItem[]>([]);
@@ -991,13 +1000,57 @@ export function useActivityFeed(limit = 15) {
           createdAt: s.created_at as string,
         }));
 
-      const merged = [...commentItems, ...stampItems]
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-        .slice(0, limit);
-      setItems(merged);
+      const newItems = [...commentItems, ...stampItems];
+      // 関数更新にする（直接setItems(newItems)すると、新着クリップ枠のfetchEffectが
+      // 先に追加した分を上書きして消してしまうため）
+      setItems((prev) => {
+        const existingIds = new Set(prev.map((i) => i.id));
+        const merged = [...prev, ...newItems.filter((i) => !existingIds.has(i.id))];
+        return merged
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          .slice(0, limit);
+      });
     })();
     return () => {
       cancelled = true;
+    };
+  }, [limit]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchRecentClips() {
+      const { data } = await supabase
+        .from("clips")
+        .select("id, title, streamer, created_at")
+        .neq("id", ACTIVITY_FEED_EXCLUDED_CLIP_ID)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (cancelled || !data) return;
+
+      const newClipItems: ActivityFeedItem[] = data.map((c) => ({
+        id: `new_clip-${c.id}`,
+        type: "new_clip",
+        clipId: c.id as string,
+        clipTitle: c.title as string,
+        streamer: c.streamer as string,
+        createdAt: c.created_at as string,
+      }));
+
+      setItems((prev) => {
+        const existingIds = new Set(prev.map((i) => i.id));
+        const merged = [...prev, ...newClipItems.filter((i) => !existingIds.has(i.id))];
+        return merged
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          .slice(0, limit);
+      });
+    }
+
+    fetchRecentClips();
+    const timer = setInterval(fetchRecentClips, NEW_CLIP_REFRESH_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
     };
   }, [limit]);
 

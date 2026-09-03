@@ -541,15 +541,22 @@ function ActivityTicker({ items }) {
     <Link key={item.id} to={`/clips/${item.clipId}`} className="cv-fade-in" style={styles.activityTicker}>
       <span className="cv-live-dot" style={styles.activityDot} />
       <span style={styles.activityText}>
-        {item.type === "comment" ? (
+        {item.type === "comment" && (
           <>
             <MessageCircle size={13} style={{ marginRight: 4, verticalAlign: -2 }} />
             <strong style={{ color: "#EDEDF2" }}>{item.displayName}</strong>さんが「{item.clipTitle}」にコメントしました
           </>
-        ) : (
+        )}
+        {item.type === "stamp" && (
           <>
             <span style={{ marginRight: 4 }}>{item.stamp}</span>
             「{item.clipTitle}」にスタンプが押されました
+          </>
+        )}
+        {item.type === "new_clip" && (
+          <>
+            <Film size={13} style={{ marginRight: 4, verticalAlign: -2 }} />
+            「{item.clipTitle}」（{item.streamer}）をクリップに追加しました
           </>
         )}
       </span>
