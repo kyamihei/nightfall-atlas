@@ -786,6 +786,7 @@ export default function ClipRanking() {
             <span style={styles.eyebrow}>Twitchクリップの掲示板</span>
           </div>
           <h1 className="clip-title-font" style={styles.h1}>
+            <img src="/favicon.ico" alt="" style={styles.h1Icon} />
             クリスレ
           </h1>
           <p style={styles.tagline}>みんなのお気に入りのクリップにコメントしてみよう！</p>
@@ -1176,7 +1177,16 @@ const styles = {
     display: "inline-block",
   },
   eyebrow: { fontSize: 12, color: "#9797A6", letterSpacing: 0.3 },
-  h1: { fontSize: 30, fontWeight: 600, margin: "0 0 6px", letterSpacing: 0.5 },
+  h1: {
+    fontSize: 30,
+    fontWeight: 600,
+    margin: "0 0 6px",
+    letterSpacing: 0.5,
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+  },
+  h1Icon: { width: 30, height: 30, borderRadius: 6, flexShrink: 0 },
   tagline: { fontSize: 13, color: "#6B6B78", margin: 0 },
   tab: {
     background: "transparent",
