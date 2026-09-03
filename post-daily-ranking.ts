@@ -1,8 +1,13 @@
 // post-daily-ranking.ts
 //
-// 前日（JST 0:00〜24:00）に一番視聴されたクリップを「問いかけ型」の文面でXへ自動投稿する
-// 日次バッチ（2026-09-03追加、「訪問者数を増やしたい」という相談への対応）。
-// クリップ個別ページには動的OGP（api/og/clip/[id].js）が効くため、リンクを貼るだけで
+// 毎朝JST 9:00にXへ自動投稿する日次バッチ（2026-09-03追加、「訪問者数を増やしたい」という
+// 相談への対応）。「日本唯一の掲示板機能があるTwitchクリップサイト」「クリップ職人の紹介」
+// 「お気に入りで自分だけのクリップコレクションが作れる」の3点を宣伝したいという要望を受け、
+// JSTの曜日でテーマをローテーションする（同じ形式の投稿ばかりだと飽きられるのを避ける狙い）。
+//   月〜金: 前日（JST 0:00〜24:00）に一番視聴されたクリップを「問いかけ型」で紹介
+//   土: 直近7日間のクリップ職人ランキング1位を紹介
+//   日: お気に入り（マイクリップコレクション）機能の紹介
+// クリップ/クリップ職人の個別ページには動的OGP（api/og/*.js）が効くため、リンクを貼るだけで
 // サムネイル付きのカードがXのタイムライン上に表示される。
 //
 // 実行例: deno run --allow-net --allow-env post-daily-ranking.ts
@@ -37,15 +42,22 @@ function formatViews(n: number): string {
 
 // Xの投稿は280文字（日本語は1字2カウント）が上限。クリップタイトルはユーザー投稿の
 // Twitch側の値でTwitch上は最大100文字程度あり得るため、長いタイトルでも安全に収まるよう
-// 保守的に切り詰める（他の固定文言込みで余裕を持たせるため50文字を上限にした）。
-const MAX_TITLE_CHARS = 50;
+// 保守的に切り詰める。配信者名25文字・視聴回数8桁という最悪ケースで試算したところ
+// 固定文言だけで重み221（ほぼ280に近い）を使うため、タイトルに使える予算は実質29文字分しかない
+// （50文字のつもりで実装したところ本番相当のデータで検証して発覚、余裕を見て25文字にした）。
+const MAX_TITLE_CHARS = 25;
 function truncateTitle(title: string): string {
   return title.length > MAX_TITLE_CHARS ? `${title.slice(0, MAX_TITLE_CHARS)}…` : title;
 }
 
+/** nowをJSTの壁時計時刻としてUTCフィールドに詰め直したDate（年月日・曜日の算出専用、実時刻としては使わない） */
+function asJstFields(now: Date): Date {
+  return new Date(now.getTime() + JST_OFFSET_MS);
+}
+
 /** JSTでの「前日 0:00〜24:00」をUTCのISO文字列範囲に変換する */
 function yesterdayJstRangeUtc(now: Date): { start: string; end: string; dateStr: string } {
-  const jstNow = new Date(now.getTime() + JST_OFFSET_MS);
+  const jstNow = asJstFields(now);
   const jstYesterdayStart = new Date(
     Date.UTC(jstNow.getUTCFullYear(), jstNow.getUTCMonth(), jstNow.getUTCDate() - 1, 0, 0, 0),
   );
@@ -61,6 +73,16 @@ function yesterdayJstRangeUtc(now: Date): { start: string; end: string; dateStr:
   const endUtc = new Date(jstYesterdayEnd.getTime() - JST_OFFSET_MS);
   const dateStr = jstYesterdayStart.toISOString().slice(0, 10);
   return { start: startUtc.toISOString(), end: endUtc.toISOString(), dateStr };
+}
+
+/** JSTでの「今日」の日付文字列（yyyy-mm-dd）。二重投稿防止の記録キーに使う */
+function todayJstDateString(now: Date): string {
+  return asJstFields(now).toISOString().slice(0, 10);
+}
+
+/** JSTでの曜日（0=日,1=月,...,6=土） */
+function jstWeekday(now: Date): number {
+  return asJstFields(now).getUTCDay();
 }
 
 // ============================================================
@@ -140,21 +162,15 @@ async function postTweet(text: string): Promise<string> {
   return data.data.id as string;
 }
 
-async function main() {
-  const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+type PostType = "ranking" | "clipper_spotlight" | "feature_intro";
+
+const BOARD_PITCH = "コメントもできるTwitchクリップの掲示板「クリスレ」";
+
+async function buildRankingPost(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+): Promise<{ text: string; clipId: string | null } | null> {
   const { start, end, dateStr } = yesterdayJstRangeUtc(new Date());
-
-  // 二重投稿防止（pg_cronのwebhookが何らかの理由で重複しても同じ日に2回投稿しない）
-  const { data: existing } = await supabase
-    .from("daily_ranking_posts")
-    .select("posted_date")
-    .eq("posted_date", dateStr)
-    .maybeSingle();
-  if (existing) {
-    console.log(`${dateStr}分はすでに投稿済みのためスキップします。`);
-    return;
-  }
-
   const { data: topClips, error } = await supabase
     .from("clips")
     .select("id, title, streamer, view_count")
@@ -171,7 +187,7 @@ async function main() {
   const top = topClips?.[0];
   if (!top) {
     console.log(`${dateStr}分のクリップが見つからなかったため、投稿をスキップします。`);
-    return;
+    return null;
   }
 
   const text = [
@@ -179,18 +195,91 @@ async function main() {
     ``,
     `正解は…${top.streamer}さん「${truncateTitle(top.title)}」（${formatViews(top.view_count)}回視聴）`,
     ``,
-    `続きのランキングはこちら👇`,
+    `${BOARD_PITCH}で続きをチェック👇`,
     `${SITE_ORIGIN}/clips/${top.id}`,
   ].join("\n");
+  return { text, clipId: top.id };
+}
 
-  console.log("投稿内容:\n" + text);
+async function buildClipperSpotlightPost(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+): Promise<{ text: string; clipId: null } | null> {
+  const now = new Date();
+  const periodStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const periodEnd = now.toISOString();
 
-  const tweetId = await postTweet(text);
+  const { data, error } = await supabase.rpc("get_top_clippers_by_period", {
+    period_start: periodStart,
+    period_end: periodEnd,
+    clipper_limit: 1,
+    clipper_offset: 0,
+  });
+  if (error) {
+    console.error("週間クリップ職人ランキングの取得に失敗しました:", error.message);
+    Deno.exit(1);
+  }
+  const top = data?.[0];
+  if (!top) {
+    console.log("直近7日間のクリップ職人ランキングが空だったため、投稿をスキップします。");
+    return null;
+  }
+
+  const text = [
+    `今週のクリップ職人ランキング1位は「${top.creator_name}」さん🎬`,
+    `直近7日間で合計${formatViews(top.total_views)}回視聴のクリップを生み出しています`,
+    ``,
+    `${BOARD_PITCH}でクリップ職人ランキングをチェック👇`,
+    `${SITE_ORIGIN}/clippers/${top.creator_id}`,
+  ].join("\n");
+  return { text, clipId: null };
+}
+
+function buildFeatureIntroPost(): { text: string; clipId: null } {
+  const text = [
+    `お気に入りのクリップ、ちゃんと保存できてますか？`,
+    ``,
+    `${BOARD_PITCH}なら、気になったクリップに⭐を付けるだけで自分だけのクリップコレクションが作れます`,
+    ``,
+    `${SITE_ORIGIN}/favorites`,
+  ].join("\n");
+  return { text, clipId: null };
+}
+
+async function main() {
+  const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+  const now = new Date();
+  const dateStr = todayJstDateString(now);
+  const weekday = jstWeekday(now); // 0=日 1=月 ... 6=土
+  const postType: PostType = weekday === 6 ? "clipper_spotlight" : weekday === 0 ? "feature_intro" : "ranking";
+
+  // 二重投稿防止（pg_cronのwebhookが何らかの理由で重複しても同じ日に2回投稿しない）
+  const { data: existing } = await supabase
+    .from("daily_ranking_posts")
+    .select("posted_date")
+    .eq("posted_date", dateStr)
+    .maybeSingle();
+  if (existing) {
+    console.log(`${dateStr}分はすでに投稿済みのためスキップします。`);
+    return;
+  }
+
+  const built =
+    postType === "ranking"
+      ? await buildRankingPost(supabase)
+      : postType === "clipper_spotlight"
+        ? await buildClipperSpotlightPost(supabase)
+        : buildFeatureIntroPost();
+  if (!built) return;
+
+  console.log(`投稿タイプ: ${postType}\n投稿内容:\n${built.text}`);
+
+  const tweetId = await postTweet(built.text);
   console.log(`投稿しました（tweet id: ${tweetId}）`);
 
   const { error: insertErr } = await supabase
     .from("daily_ranking_posts")
-    .insert({ posted_date: dateStr, clip_id: top.id, tweet_id: tweetId });
+    .insert({ posted_date: dateStr, clip_id: built.clipId, tweet_id: tweetId, post_type: postType });
   if (insertErr) console.error("daily_ranking_postsへの記録に失敗:", insertErr.message);
 }
 
