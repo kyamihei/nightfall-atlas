@@ -2,16 +2,19 @@
 
 サイト名「クリスレ」（`<title>`は「クリスレ | Twitchクリップの掲示板サイト」）。
 Twitchクリップのランキング掲示板。お気に入り・独自リアクションスタンプ・匿名コメント（返信対応）・
-クリップ検索（タイトル/URL）・総合スレ・トレンド表示・配信者検索・登録リクエストができるサイト
-（tw-clip相当のUI/仕様を踏襲）。いいね/よくないね機能はバックエンドごと残したままUI上のみ無効化しており、
-代わりに独自のリアクションスタンプ機能を主軸にしている（詳細は各節を参照）。
+クリップ検索（タイトル/URL）・総合スレ・タグスレ（ユーザーが自由に立てられるタグ別スレ）・
+トレンド表示・配信者検索・登録リクエスト・クリップ職人（クリップを作った視聴者）ランキング・
+配信者への個人タグ付けができるサイト（tw-clip相当のUI/仕様を踏襲）。いいね/よくないね機能は
+バックエンドごと残したままUI上のみ無効化しており、代わりに独自のリアクションスタンプ機能を
+主軸にしている（詳細は各節を参照）。運営向けに簡易管理画面（非公開URL）とX（旧Twitter）への
+毎日の自動投稿も備える。
 
 ## 技術構成
 
 - フロント: React 19 + Vite + react-router-dom。UIはstyleオブジェクトによるインラインCSS（外部CSSフレームワークなし）。`src/styles/theme.css`（`main.jsx`でグローバル読み込み）に全ページ共通の演出（フォント読み込み・スクロールバー・ボタン押下フィードバック・フォーカスリング・`cv-`接頭辞の共通アニメーションクラス）を集約している
 - バックエンド: Supabase（Postgres + Auth匿名サインイン + Edge Functions + Realtime）
 - クリップ同期: `sync-twitch-clips.ts`（Deno）がTwitch Helix APIから定期的にクリップを取得し、Supabaseへ書き込む。`sync-live-clips.ts`はいまライブ中の配信者だけを高頻度でチェックする軽量版（詳細は後述）。`refresh-clip-views.ts`は既存クリップのview_countだけを定期的に再取得する別スクリプト（詳細は後述）
-- 自動実行: `.github/workflows/sync-clips.yml`が毎朝JST 6:05頃に新規クリップ収集（全追跡配信者対象）を実行、`.github/workflows/sync-live-clips.yml`が15分おきにライブ中配信者だけの軽量同期を実行、`.github/workflows/refresh-clip-views.yml`が毎時20分にview_count同期を実行（すべて`workflow_dispatch`で手動実行可）
+- 自動実行: `.github/workflows/sync-clips.yml`が毎朝JST 6:05頃に新規クリップ収集（全追跡配信者対象）を実行、`.github/workflows/sync-live-clips.yml`が15分おきにライブ中配信者だけの軽量同期（配信者の新規発見も含む）を実行、`.github/workflows/refresh-clip-views.yml`が毎時20分にview_count同期を実行、`.github/workflows/post-daily-ranking.yml`が毎朝JST 9:00にXへ自動投稿を実行（すべて`workflow_dispatch`のみを持ち、GitHub Actions自身の`schedule`は使わない。実際の定期起動はSupabase側の`pg_cron`がWebhookで叩く方式、詳細は「GitHub Actionsのscheduleトリガーが信頼できない問題への対応」節参照）
 
 ## ディレクトリ構成
 
@@ -28,21 +31,38 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   - `GeneralThread.jsx` - クリップに紐付かない全体掲示板「総合スレ」（`/general`）
   - `TagThreadList.jsx` / `TagThreadDetail.jsx` - ユーザーが自由にタイトルを立てて話せる「タグスレ」
     一覧・詳細（`/threads`, `/threads/:id`。総合スレとは別の専用テーブルで実装、詳細は該当節参照）
-  - `Footer.jsx` - 全ページ共通フッター（ホーム/サイトについて/利用規約/プライバシーポリシー/お問い合わせ＋Copyright）
+  - `Footer.jsx` - 全ページ共通フッター（ホーム/サイトについて/利用規約/プライバシーポリシー/お問い合わせ＋Copyright、
+    定期更新カウントダウン＝`SyncTimer`、X（旧Twitter）フォロー導線バナーも表示。詳細は各追加節参照）
   - `AboutPage.jsx` / `TermsPage.jsx` / `PrivacyPage.jsx` - 静的コンテンツページ（`/about`, `/terms`, `/privacy`）
   - `ContactPage.jsx` - お問い合わせフォーム（`/contact`）
+  - `AdminPage.jsx` - 簡易管理画面（ダッシュボード/お問い合わせ/コメント通報/配信者リクエスト、
+    URLは推測困難なパス。詳細は「簡易管理画面」節参照）
+  - `ShareButtons.jsx` - X/LINE共有・リンクコピーの共通ボタン（クリップ/配信者/クリップ職人の各詳細ページで使用）
 - `src/lib/supabase-client.ts` - Supabaseクライアント初期化＋匿名認証（`ensureAnonymousSession`）
 - `src/lib/use-clip-ranking.ts` - データ層フック集（`useClips` / `useReactions` / `useFavorites` / `useMyFavorites` /
   `useClipStamps` / `useMyStamps` / `useTrendingClips` / `useClipSearch` / `useComments` /
   `useBroadcasterSearch` / `useBroadcasterRequest` / `useContactForm` / `useCommentReport` /
-  `useBroadcasterAvatars` / `useClipperRanks` / `useTopClippersByPeriod` など）。`favorites`テーブル・RLSは
+  `useBroadcasterAvatars` / `useClipperRanks` / `useTopClippersByPeriod` /
+  `useActivityFeed` / `useBroadcasterTags` / `useTagThreads`関連 など多数）。`favorites`テーブル・RLSは
   Supabaseスキーマに元々あったがUIが未実装だったため2026-09-02に`useFavorites`/`useMyFavorites`と
   UIを追加して完成させた
+- `src/lib/use-admin.ts` - 管理画面専用のデータ層フック集（`useAdminAuth`/`useAdminDashboard`/`useAdminContactMessages`等）
+- `src/lib/use-document-meta.js` - クリップ/配信者/クリップ職人の個別ページでdocument.title・meta description等を
+  動的更新する`useDocumentMeta`フック（SEO対応、詳細は「SEO強化とSNSシェア導線」節参照）
 - `supabase/schema.sql`, `supabase/migrations/` - テーブル・RLS・トリガー・RPC定義
 - `supabase/functions/post-comment/` - コメント投稿Edge Function（NGワード検査・レート制限）
 - `supabase/functions/request-broadcaster/` - 配信者登録リクエストEdge Function（Twitch実在確認つき）
 - `supabase/functions/submit-contact/` - お問い合わせフォーム送信Edge Function（レート制限のみ、NGワード検査なし）
-- `sync-twitch-clips.ts` - Twitchクリップ同期バッチ（Deno、ルート直下）
+- `api/` - Vercelサーバーレス関数（Node.js、フロントのVite/Reactとは別系統）
+  - `api/og/clip/[id].js` / `api/og/broadcaster/[name].js` / `api/og/clipper/[id].js` - SNSクローラー向け動的OGP
+  - `api/sitemap.xml.js` - 動的sitemap（`vercel.json`のrewriteで`/sitemap.xml`にマッピング）
+  - `api/_lib/` - 上記が共有するSupabase REST呼び出し・HTML生成ヘルパー
+- Denoスクリプト（ルート直下、いずれもGitHub Actions実行、詳細は各節参照）:
+  - `sync-twitch-clips.ts` - 日次のTwitchクリップ同期バッチ（配信者の新規発見・過去分バックフィル含む）
+  - `sync-live-clips.ts` - 15分おきのライブ配信者クリップ即時反映（配信者の新規発見も担う、2026-09-03追記）
+  - `refresh-clip-views.ts` - 既存クリップのview_countラウンドロビン再同期（毎時）
+  - `post-daily-ranking.ts` - 毎朝JST 9:00のX自動投稿（ランキング/クリップ職人紹介/機能紹介ローテーション）
+  - `backfill-clip-creators.ts` - クリップ職人（creator_id/name）の遡及取得（一回限り実行済み）
 
 ## 期間・日付の仕様
 
@@ -486,12 +506,12 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   日本語対応の「RocknRoll One」に変更（`theme.css`のGoogle Fonts `@import`に追加）。
 - **基本的なSEO対応**を追加（`index.html`）: `<html lang="en">`→`lang="ja"`に修正、
   meta description・OGP（`og:*`）・Twitter Cardタグ、`canonical`を`https://kurisure.jp/`で追加。
-  `public/robots.txt`・`public/sitemap.xml`も新規追加（sitemapは静的ページのみ）。
-  - **未対応（次のステップ候補）**: クリップ/配信者/クリップ職人の個別ページ
-    （`/clips/:id`等）はSPAのため`index.html`の固定`<title>`/metaしか出せておらず、
-    sitemap.xmlにも含めていない。動的にmetaを差し替える対応（react-helmet-async等）と、
-    ビルド時にSupabaseから全クリップ/配信者IDを取得してsitemapへ含める仕組みは、
-    より大きな作業になるため今回は見送った。
+  `public/robots.txt`も新規追加。
+  - **（解消済み、2026-09-03同日中）** 当初はクリップ/配信者/クリップ職人の個別ページの
+    動的meta未対応・sitemapが静的ページのみという制約があったが、同日後半の
+    「SEO強化とSNSシェア導線」節の対応で両方解消済み。`public/sitemap.xml`（静的ファイル）は
+    その対応の中で**廃止**し、`api/sitemap.xml.js`（動的生成）に置き換わっている。
+    このファイルへの直接参照は残っていないので注意。
 
 ## トップページのランキング/トレンド タブ統合・期間指定のボタン化（2026-09-03追加）
 
@@ -589,7 +609,9 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
 ## 環境変数
 
 - `.env`（Git管理外）: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
-- GitHub Actions Secrets: `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `TARGET_GAME_IDS`
+- GitHub Actions Secrets: `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `TARGET_GAME_IDS`,
+  `X_API_KEY`, `X_API_KEY_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_TOKEN_SECRET`（2026-09-03追加、X自動投稿用。
+  Supabase Vaultではなくこちらに置く理由は「毎日のランキングをXへ自動投稿」節参照）
 - 元のセットアップ手順・秘密値は親ディレクトリ（`C:\clip-vote`）の `CLAUDE_CODE_INSTRUCTIONS.md` と `.env.human-provided` を参照（このリポジトリには含まれない）
 
 ## 簡易管理画面（2026-09-03追加、2026-09-03にURL非公開化）
@@ -658,8 +680,6 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
     素朴な`count(*)`でも数百ms程度で収まることを実測確認済み（clips=54万件のような規模でのみ
     問題化する）。**今後このRPCに項目を追加する際は、対象テーブルの行数がclips並みに
     大きくなりうるかどうかを先に確認すること**。
-
-
 
 ## SEO強化とSNSシェア導線（2026-09-03追加）
 
