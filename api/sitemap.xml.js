@@ -46,7 +46,10 @@ export default async function handler(req, res) {
     ),
   ];
 
+  const debug = `<!-- debug: broadcasters=${broadcasters === null ? "null" : broadcasters.length} clippers=${clippers === null ? "null" : clippers.length} clips=${clips === null ? "null" : clips.length} -->`;
+
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
+${debug}
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${entries.join("\n")}
 </urlset>
