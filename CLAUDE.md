@@ -10,8 +10,8 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
 
 - フロント: React 19 + Vite + react-router-dom。UIはstyleオブジェクトによるインラインCSS（外部CSSフレームワークなし）。`src/styles/theme.css`（`main.jsx`でグローバル読み込み）に全ページ共通の演出（フォント読み込み・スクロールバー・ボタン押下フィードバック・フォーカスリング・`cv-`接頭辞の共通アニメーションクラス）を集約している
 - バックエンド: Supabase（Postgres + Auth匿名サインイン + Edge Functions + Realtime）
-- クリップ同期: `sync-twitch-clips.ts`（Deno）がTwitch Helix APIから定期的にクリップを取得し、Supabaseへ書き込む。`refresh-clip-views.ts`は既存クリップのview_countだけを定期的に再取得する別スクリプト（詳細は後述）
-- 自動実行: `.github/workflows/sync-clips.yml`が毎朝JST 6:05頃に新規クリップ収集を実行、`.github/workflows/refresh-clip-views.yml`が毎時20分にview_count同期を実行（どちらも`workflow_dispatch`で手動実行可）
+- クリップ同期: `sync-twitch-clips.ts`（Deno）がTwitch Helix APIから定期的にクリップを取得し、Supabaseへ書き込む。`sync-live-clips.ts`はいまライブ中の配信者だけを高頻度でチェックする軽量版（詳細は後述）。`refresh-clip-views.ts`は既存クリップのview_countだけを定期的に再取得する別スクリプト（詳細は後述）
+- 自動実行: `.github/workflows/sync-clips.yml`が毎朝JST 6:05頃に新規クリップ収集（全追跡配信者対象）を実行、`.github/workflows/sync-live-clips.yml`が15分おきにライブ中配信者だけの軽量同期を実行、`.github/workflows/refresh-clip-views.yml`が毎時20分にview_count同期を実行（すべて`workflow_dispatch`で手動実行可）
 
 ## ディレクトリ構成
 
@@ -289,6 +289,62 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   （ヘッダーの「スタンプ一覧」リンク、`/my-stamps`の見出し）。**今後、装飾目的の絵文字は使わず、
   既存パターンに倣って`lucide-react`のアイコンを使うこと**（スタンプ名自体の文字列「すっご」等は
   絵文字ではなくテキストなので対象外）。
+
+## トップページのランキング/トレンド タブ統合・期間指定のボタン化（2026-09-03追加）
+
+- トップページ上部に別ウィジェットとして表示していた「いまトレンド」（`TrendingBoard`）を廃止し、
+  クリップランキング本体と同じ表示領域で「ランキング」/「いまトレンド」タブ切り替え表示する方式に
+  変更（`ClipRanking.jsx`の`activeView`state）。タブクリックだけでなく、タッチのスワイプ
+  （`onTouchStart`/`onTouchEnd`のX座標差分で判定、閾値50px）でも切り替えられる。切り替え時は
+  `theme.css`に追加した`cv-slide-in-from-right`/`cv-slide-in-from-left`でスライド+フェードする
+  （常に2枚のパネルを並べて幅200%でtranslateXするカルーセル方式は、ランキング（最大20件）と
+  トレンド（5件）で高さが大きく異なり片方に無駄な余白ができるため採用せず、アクティブな方だけを
+  マウントしてCSSアニメーションで差し替える方式にした）。
+  - トレンドクリップも通常のランキング行と同じ`ClipRow`で描画するため、いいね/お気に入り/
+    スタンプ/コメントがトレンド表示中でも同じように使える。`useReactions`/`useFavorites`/
+    `useClipStamps`/`useBroadcasterAvatars`/`useClipperRanks`に渡すclipIds/streamerNames/
+    creatorIdsは、ランキング一覧とトレンド一覧の両方のクリップを`useMemo`でマージしたものを使う
+    （タブを切り替えるたびに読み込み直すとちらつくため、両タブ分を常に一緒に取得している）。
+  - `ClipRow`に`trendingViewsPerHour`propを追加し、渡された場合だけmetaLineに
+    「・時間あたりX回」を追記する（トレンド表示時のみ）。
+- 「全期間/今年/今月/日別」の常時表示タブ行（+日別選択時はさらに7日分のタブ行）を、
+  現在の選択を表示する1つのボタン（例:「9/3(木)」「全期間」）に集約。押すとポップオーバーで
+  期間タブ（日別選択時はそのまま同じポップオーバー内に日付タブも表示）が開く方式に変更
+  （`periodPickerOpen`state、外側クリックで閉じるのは`mousedown`イベントリスナー＋refで判定）。
+
+## 最新クリップ反映の高速化・tracked_broadcasters取得の1000件上限バグ修正（2026-09-03追加）
+
+- **課題**: 新規クリップの収集は`sync-twitch-clips.ts`が1日1回（JST 6:05）、追跡中の配信者
+  全員に対して「直近24時間分のクリップ」を取得するだけだったため、配信者がクリップを作ってから
+  最大24時間サイトに反映されないことがあった。
+- **対応**: `sync-live-clips.ts`（新規スクリプト）を追加し、`.github/workflows/sync-live-clips.yml`で
+  15分おきに自動実行する。クリップはライブ配信中にしか作られないため、追跡配信者全員ではなく
+  「いまライブ配信中」の人だけをGet Streams（`user_id`を1リクエスト最大100個指定、日本語配信の
+  発見とは無関係にidで直接問い合わせ）で絞り込み、その人たちの直近30分（実行間隔15分に対して
+  安全マージンを持たせた値）のクリップだけをGet Clipsで取得してupsertする軽量版。
+  配信者の新規発見・過去分バックフィル・配信者/クリッパーランキングの集計ビュー更新は
+  引き続き日次の`sync-twitch-clips.ts`の役割のまま（`get_ranked_clips`/`get_trending_clips`は
+  clipsテーブルを直接ライブ集計するRPCのため、upsertした時点で即座にランキング/トレンドへ反映される。
+  集計ビュー経由の配信者/クリッパーランキングだけは引き続き日次更新分だけ遅れる）。
+  - ライブ中と確認できた配信者は`tracked_broadcasters.last_seen_at`もその場で更新する。
+    カテゴリ横断の日次discoveryだけに頼ると、対象ゲームカテゴリにも日本語配信人気上位にも
+    入らない配信者はいずれ`BROADCASTER_STALE_DAYS`（30日）を超えて追跡対象から外れてしまうため、
+    実際にライブを観測できた時点でも延命するようにしている。
+  - 頻度は「15分おき（バランス重視）」をユーザーと相談の上で採用。このリポジトリはprivateで
+    GitHub Actionsの無料枠が月2,000分のため、このワークフローだけで月3,000〜5,000分程度
+    追加消費する見込み（実測: スクリプト本体の実行時間は約50秒、Actionsのセットアップ込みで
+    1回1.5〜2分程度）。無料枠を超える場合は超過分が課金される点に注意（頻度を下げる場合は
+    cronの`*/15 * * * *`を変更するだけでよい）。
+  - **同時に見つけた既存バグ修正**: `sync-twitch-clips.ts`の対象配信者取得
+    （`tracked_broadcasters`を`last_seen_at`で絞り込むSELECT）が`.range()`等のページングなしの
+    素朴なSELECTだったため、PostgRESTの既定の行数上限（Supabase側の設定で1000件）で
+    サイレントに切り詰められていた。本番の`tracked_broadcasters`は既に1,914件（アクティブ判定
+    のみでも1,914件）あり、実際に本番相手にpaginationありの取得で1,914件全件返ることを確認して
+    修正した（`tracked_clippers`のアイコン取得で過去に踏んだのと同種の罠、「クリップ職人
+    ランキング」節参照）。`fetchAllRows`ヘルパー（`.range()`で1000件ずつページングして全件取得）を
+    `sync-twitch-clips.ts`・`sync-live-clips.ts`の両方に用意した（スクリプトごとに自己完結させる
+    という既存方針を踏襲し、共通モジュール化はしていない）。**今後、件数が増え得るテーブルに
+    対して`.limit()`を指定しない素朴なSELECTを追加する際は、必ずこのページング上限を踏まえること**。
 
 ## 認証
 

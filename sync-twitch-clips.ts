@@ -62,6 +62,41 @@ async function waitForRateLimitReset(res: Response) {
   }
 }
 
+/**
+ * PostgRESTの既定の行数上限（Supabase側の設定で1000件）を超えるSELECTは、
+ * range()等で明示的にページングしない限りサイレントに切り詰められる。
+ * tracked_broadcastersが1000件を超えて以降、無ページングのSELECTで対象配信者が
+ * 一部だけしか取得できなくなっていた実際の不具合を踏まえて導入したヘルパー
+ * （tracked_clippersのアイコン取得で同種の罠を過去に踏んだのと同じ原因、CLAUDE.md参照）。
+ */
+async function fetchAllRows(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  table: string,
+  // deno-lint-ignore no-explicit-any
+  buildQuery: (query: any) => any,
+  // deno-lint-ignore no-explicit-any
+): Promise<any[] | null> {
+  const PAGE_SIZE = 1000;
+  // deno-lint-ignore no-explicit-any
+  const rows: any[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await buildQuery(supabase.from(table)).range(from, from + PAGE_SIZE - 1);
+    if (error) {
+      console.error(`${table}の取得に失敗しました:`, error.message);
+      return null;
+    }
+    if (!data || data.length === 0) break;
+    rows.push(...data);
+    if (data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+
+  return rows;
+}
+
 interface TwitchClip {
   id: string;
   broadcaster_id: string;
@@ -356,12 +391,10 @@ async function main() {
 
   // 2. 直近で見つかっている配信者（今回発見分＋過去分のうち一定期間内）のクリップを収集
   const staleBefore = new Date(Date.now() - BROADCASTER_STALE_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  const { data: activeBroadcasters, error: fetchErr } = await supabase
-    .from("tracked_broadcasters")
-    .select("broadcaster_id")
-    .gte("last_seen_at", staleBefore);
-
-  if (fetchErr || !activeBroadcasters) {
+  const activeBroadcasters = await fetchAllRows(supabase, "tracked_broadcasters", (q) =>
+    q.select("broadcaster_id").gte("last_seen_at", staleBefore),
+  );
+  if (activeBroadcasters === null) {
     console.error("tracked_broadcastersの取得に失敗しました");
     Deno.exit(1);
   }

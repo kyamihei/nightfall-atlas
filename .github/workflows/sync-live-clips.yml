@@ -1,0 +1,40 @@
+# .github/workflows/sync-live-clips.yml
+#
+# sync-live-clips.ts を15分おきに自動実行するためのGitHub Actionsワークフロー。
+# sync-clips.yml（日次・全追跡配信者対象）とは別に、いまライブ配信中の追跡配信者だけを
+# 高頻度でチェックし、新しいクリップをすばやくサイトへ反映するためのもの。
+# 2026-09-03、「最新クリップの反映が遅い」という要望への対応で追加。
+#
+# 事前準備:
+#   sync-clips.ymlと同じSecretsを使うため追加設定は不要（TARGET_GAME_IDSは使わない）。
+#     TWITCH_CLIENT_ID
+#     TWITCH_CLIENT_SECRET
+#     SUPABASE_URL
+#     SUPABASE_SERVICE_ROLE_KEY
+
+name: Sync Live Twitch Clips
+
+on:
+  schedule:
+    - cron: "*/15 * * * *" # 15分おき
+  workflow_dispatch: {} # Actionsタブから手動実行もできるようにする
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      - name: Denoをセットアップ
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: ライブクリップ同期スクリプトを実行
+        env:
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+          TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: deno run --allow-net --allow-env sync-live-clips.ts
