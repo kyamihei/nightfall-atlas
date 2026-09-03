@@ -587,12 +587,17 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
 - GitHub Actions Secrets: `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `TARGET_GAME_IDS`
 - 元のセットアップ手順・秘密値は親ディレクトリ（`C:\clip-vote`）の `CLAUDE_CODE_INSTRUCTIONS.md` と `.env.human-provided` を参照（このリポジトリには含まれない）
 
-## 簡易管理画面（`/admin`、2026-09-03追加）
+## 簡易管理画面（2026-09-03追加、2026-09-03にURL非公開化）
 
 - 「問い合わせ確認をSQL直打ちでやっているのが面倒」というニーズへの対応。`contact_messages`・
   `comment_reports`・`broadcaster_requests`の3つを1画面で確認・一部操作できる管理画面を追加した
   （`src/components/AdminPage.jsx`、データ層は`src/lib/use-admin.ts`）。**どのナビにもリンクしていない**
   （URLを直接知っている運営だけが使う想定、意図的な設計）。
+- **URLは`/admin`ではなく推測困難なランダム文字列付きパス**（`src/App.jsx`のルート定義を直接参照すること。
+  このファイルには意図的に実際のパスを書かない）。当初`/admin`だったが、ユーザーから
+  「推測されやすいので私にしか到達できないようにしたい」と指摘され変更した。パスワード認証
+  （後述）は維持しつつ、URL自体の推測困難性で防御を1段階増やす方針。今後URLを変更する場合は
+  `src/App.jsx`のルートを書き換えるだけでよい（サーバー側の設定変更は不要）。
 - サイトにアカウント認証システムが無いため、簡易的にパスワードゲート方式にした。パスワードは
   Supabase Vaultに保存（`vault.create_secret(..., 'admin_panel_password', ...)`、平文はgit管理外）し、
   `security definer`のRPC（`admin_verify_password`でログイン確認、`admin_get_*`/`admin_set_*`で

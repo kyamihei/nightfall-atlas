@@ -39,7 +39,7 @@ export default function App() {
         <Route path="/terms" element={<TermsPage />} />
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/contact" element={<ContactPage />} />
-        <Route path="/admin" element={<AdminPage />} />
+        <Route path="/admin-e9ae0115e698436e" element={<AdminPage />} />
       </Routes>
     </BrowserRouter>
   );
