@@ -1,0 +1,22 @@
+{
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "clip-vote.vercel.app" }],
+      "destination": "https://kurisure.jp/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "clip-vote-kyamihei.vercel.app" }],
+      "destination": "https://kurisure.jp/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "clip-vote-git-master-kyamihei.vercel.app" }],
+      "destination": "https://kurisure.jp/:path*",
+      "permanent": true
+    }
+  ]
+}
