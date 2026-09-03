@@ -4,14 +4,20 @@
 # ワークフロー。sync-clips.yml（日次、新規クリップの発見・収集が主目的）とは別に、
 # 「作成から24時間を超えた既存クリップのview_countが実際の値からズレていく」問題に対応する。
 #
+# 【重要】GitHub Actions自体の`schedule`トリガーは実測で信頼できないことが判明したため
+# （毎時のはずが実際は数時間おきにしか発火せず、view_countが全クリップの95%で
+# 一度も更新されないという実害が発生）、scheduleトリガーはあえて設定していない。
+# 代わりにSupabase側のpg_cron（DBレベルのスケジューラ）が毎時20分にこのworkflowの
+# dispatches APIをWebhookで叩く方式にした
+# （`supabase/migrations/20260903140000_reliable_cron_via_pg_cron.sql`の
+# `trigger-refresh-clip-views`ジョブ）。workflow_dispatchはpg_cronからの起動と手動実行を兼ねる。
+#
 # 事前準備: sync-clips.ymlと同じSecretsを使う（追加設定は不要）
 #   TWITCH_CLIENT_ID / TWITCH_CLIENT_SECRET / SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY
 
 name: Refresh Clip View Counts
 
 on:
-  schedule:
-    - cron: "20 * * * *" # 毎時20分（sync-clips.ymlの6:05実行と重ならない時間）
   workflow_dispatch:
     inputs:
       max_clips:

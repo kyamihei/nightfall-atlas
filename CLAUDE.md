@@ -292,6 +292,42 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   既存パターンに倣って`lucide-react`のアイコンを使うこと**（スタンプ名自体の文字列「すっご」等は
   絵文字ではなくテキストなので対象外）。
 
+## GitHub Actionsのscheduleトリガーが信頼できない問題への対応（2026-09-03追加、重要）
+
+- **発覚の経緯**: ユーザーから「クリスレの最新クリップと本家Twitchを比較すると差異がある、
+  競合サイト（twitchclipsranking.com）はしっかり取れている」と指摘。調査したところ、
+  競合サイトに載っていた新着クリップ4件はすべて本サイトのDBにも存在していたが、
+  view_countが大きくズレていた（例: 実際6,074回のところ本サイトは192回）。原因を辿ると
+  `clips.view_count_synced_at`（view_count最終更新時刻）が**全54万件中51万件（95%）で
+  NULL＝一度も更新されていない**ことが判明。さらに加藤純一の別クリップ1件は完全に未取得
+  だった（配信者自体は追跡済みなのに）。
+- **根本原因**: `refresh-clip-views.yml`（毎時20分想定）・`sync-live-clips.yml`（15分おき想定）
+  の実行履歴を`gh run list`で確認したところ、**GitHub Actions自体の`schedule`トリガーが
+  設定通りに発火していなかった**（sync-live-clips.ymlは直近12時間で2回のみ、4時間半以上の
+  間隔が開くこともあった）。日次のsync-clips.ymlも本来UTC 21:05のところ実際は23時台に
+  ずれ込んでいた。手動で`workflow_dispatch`を叩くと毎回正常・高速に完了することから、
+  ワークフロー自体のロジックは正しく、GitHub Actions側のスケジューラが高負荷時に
+  `schedule`イベントを間引く/遅延させるという既知の制約（特に短い間隔のcronほど影響が大きい）
+  が本番で実際に問題化していたと判断した。
+- **対応**: GitHub Actions自身の`schedule`トリガーを全廃止し（3ワークフローとも
+  `workflow_dispatch`のみ残す）、代わりに**Supabase側の`pg_cron`+`pg_net`拡張**
+  （DBレベルのスケジューラ、GitHub Actions自体の混雑に左右されない）から
+  GitHub REST APIの`workflow_dispatch`エンドポイントをWebhookで確実に叩く方式に変更した
+  （`supabase/migrations/20260903140000_reliable_cron_via_pg_cron.sql`）。
+  - GitHub側でこのリポジトリのみに限定したfine-grained PAT（Actions: Read and write権限）を
+    ユーザーに発行してもらい、`vault.create_secret()`でSupabase Vaultに保管
+    （平文をgit管理下に置かない。マイグレーションファイルにはVaultから
+    `vault.decrypted_secrets`経由で参照する形のみを書く）。
+  - `net.http_post`は非同期（`net._http_response`テーブルに後から結果が入る）。
+    本番で手動実行して`status_code: 204`＋実際にActionsのrunが起動することを確認済み。
+  - cronジョブは3つ: `trigger-sync-live-clips`（`*/15 * * * *`）、
+    `trigger-refresh-clip-views`（`20 * * * *`）、`trigger-sync-clips`（`5 21 * * *`、
+    UTC 21:05=JST 6:05）。ジョブ名・スケジュールは`cron.job`テーブルで確認できる。
+  - **今後同種のワークフローを追加する際の教訓**: GitHub Actionsの`schedule`は
+    「ベストエフォート」であり、本番の定期実行を確実性が必要な用途（クリップ収集等）に
+    使う場合は、素朴に`schedule:`を設定するだけでは不十分。pg_cron等DB側のスケジューラから
+    `workflow_dispatch`を叩く構成にすること。
+
 ## タグスレ（ユーザー投稿型のスレ立て機能、2026-09-03追加）
 
 - 「ZETAというタグを付けたら、それについて話すスレを立てたい」という要望への対応。

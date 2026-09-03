@@ -1100,3 +1100,73 @@ $$ language plpgsql security definer;
 --    「同一ip_hashからのレート制限」「NGワード検査」を行うこと（クライアント側の制限は回避可能なため）。
 -- 4. プロバイダ責任制限法対応のため、comments.ip_hash と created_at は
 --    開示請求が来た場合に備えて一定期間（例: 90日）削除せず保持するポリシーを別途定めること。
+
+-- ============================================================
+-- pg_cronによるGitHub Actions workflow_dispatchの確実な定期起動（2026-09-03追加）
+-- ============================================================
+-- GitHub Actions自体の`schedule`トリガーが実測で信頼できないことが判明したため
+-- （15分おき設定のsync-live-clips.ymlが実際は数時間おきにしか発火せず、クリップ取りこぼしの
+-- 実害が発生。詳細はCLAUDE.md参照）、Supabase側のpg_cron（DBレベルのスケジューラ、
+-- GitHub Actions自体の混雑に左右されない）からworkflow_dispatch APIをWebhookで確実に叩く方式にした。
+-- 各workflowファイル側の`schedule:`トリガーは同時に削除済み（二重実行防止、`workflow_dispatch:`のみ残す）。
+--
+-- 事前準備（このファイルには含まれない、平文の秘密情報をgit管理下に置かないため）:
+--   GitHub側でclip-voteリポジトリのみに限定したfine-grained PAT（Actions: Read and write権限）を発行し、
+--   以下でVaultへ登録しておくこと。
+--     select vault.create_secret('<PAT>', 'github_actions_pat', '...');
+create extension if not exists pg_cron;
+create extension if not exists pg_net;
+
+select cron.schedule(
+  'trigger-sync-live-clips',
+  '*/15 * * * *',
+  $$
+  select net.http_post(
+    url := 'https://api.github.com/repos/kyamihei/clip-vote/actions/workflows/sync-live-clips.yml/dispatches',
+    headers := jsonb_build_object(
+      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'github_actions_pat'),
+      'Accept', 'application/vnd.github+json',
+      'Content-Type', 'application/json',
+      'User-Agent', 'clip-vote-pg-cron'
+    ),
+    body := jsonb_build_object('ref', 'master'),
+    timeout_milliseconds := 10000
+  );
+  $$
+);
+
+select cron.schedule(
+  'trigger-refresh-clip-views',
+  '20 * * * *',
+  $$
+  select net.http_post(
+    url := 'https://api.github.com/repos/kyamihei/clip-vote/actions/workflows/refresh-clip-views.yml/dispatches',
+    headers := jsonb_build_object(
+      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'github_actions_pat'),
+      'Accept', 'application/vnd.github+json',
+      'Content-Type', 'application/json',
+      'User-Agent', 'clip-vote-pg-cron'
+    ),
+    body := jsonb_build_object('ref', 'master'),
+    timeout_milliseconds := 10000
+  );
+  $$
+);
+
+select cron.schedule(
+  'trigger-sync-clips',
+  '5 21 * * *',
+  $$
+  select net.http_post(
+    url := 'https://api.github.com/repos/kyamihei/clip-vote/actions/workflows/sync-clips.yml/dispatches',
+    headers := jsonb_build_object(
+      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'github_actions_pat'),
+      'Accept', 'application/vnd.github+json',
+      'Content-Type', 'application/json',
+      'User-Agent', 'clip-vote-pg-cron'
+    ),
+    body := jsonb_build_object('ref', 'master'),
+    timeout_milliseconds := 10000
+  );
+  $$
+);

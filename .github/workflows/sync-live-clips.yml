@@ -1,9 +1,15 @@
 # .github/workflows/sync-live-clips.yml
 #
-# sync-live-clips.ts を15分おきに自動実行するためのGitHub Actionsワークフロー。
-# sync-clips.yml（日次・全追跡配信者対象）とは別に、いまライブ配信中の追跡配信者だけを
-# 高頻度でチェックし、新しいクリップをすばやくサイトへ反映するためのもの。
+# sync-live-clips.ts をいまライブ配信中の追跡配信者だけ高頻度でチェックし、
+# 新しいクリップをすばやくサイトへ反映するためのワークフロー。
 # 2026-09-03、「最新クリップの反映が遅い」という要望への対応で追加。
+#
+# 【重要】GitHub Actions自体の`schedule`トリガーは実測で信頼できないことが判明したため
+# （15分おき設定のはずが実際は数時間おきにしか発火せず、クリップ取りこぼしの実害が発生）、
+# scheduleトリガーはあえて設定していない。代わりにSupabase側のpg_cron（DBレベルの
+# スケジューラ）が15分おきにこのworkflowのdispatches APIをWebhookで叩く方式にした
+# （`supabase/migrations/20260903140000_reliable_cron_via_pg_cron.sql`の
+# `trigger-sync-live-clips`ジョブ）。workflow_dispatchはpg_cronからの起動と手動実行を兼ねる。
 #
 # 事前準備:
 #   sync-clips.ymlと同じSecretsを使うため追加設定は不要（TARGET_GAME_IDSは使わない）。
@@ -15,9 +21,7 @@
 name: Sync Live Twitch Clips
 
 on:
-  schedule:
-    - cron: "*/15 * * * *" # 15分おき
-  workflow_dispatch: {} # Actionsタブから手動実行もできるようにする
+  workflow_dispatch: {} # pg_cronからのAPI起動、およびActionsタブからの手動実行用
 
 jobs:
   sync:

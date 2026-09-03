@@ -3,6 +3,13 @@
 # sync-twitch-clips.ts を毎日自動実行するためのGitHub Actionsワークフロー。
 # tw-clipの集計期間が「毎朝6時始まり」だったのに合わせて、JST 6:05頃に実行する設定。
 #
+# 【重要】GitHub Actions自体の`schedule`トリガーは実測で信頼できないことが判明したため
+# （本来UTC 21:05発火のはずが実際は23時台にずれ込む等）、scheduleトリガーはあえて
+# 設定していない。代わりにSupabase側のpg_cron（DBレベルのスケジューラ）がUTC 21:05に
+# このworkflowのdispatches APIをWebhookで叩く方式にした
+# （`supabase/migrations/20260903140000_reliable_cron_via_pg_cron.sql`の
+# `trigger-sync-clips`ジョブ）。workflow_dispatchはpg_cronからの起動と手動実行を兼ねる。
+#
 # 事前準備:
 #   このリポジトリの Settings > Secrets and variables > Actions で
 #   以下のSecretsを登録しておくこと。
@@ -15,9 +22,7 @@
 name: Sync Twitch Clips
 
 on:
-  schedule:
-    - cron: "5 21 * * *" # UTC 21:05 = JST 翌6:05
-  workflow_dispatch: {} # Actionsタブから手動実行もできるようにする
+  workflow_dispatch: {} # pg_cronからのAPI起動、およびActionsタブからの手動実行用
 
 jobs:
   sync:
