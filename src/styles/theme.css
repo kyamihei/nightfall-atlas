@@ -195,3 +195,43 @@ button:disabled {
     box-shadow: 0 0 0 4px transparent;
   }
 }
+
+/* 背景の装飾用ブロブ（ぼかした光の塊）。実データとは無関係な純粋な演出で、
+   「サイトが盛り上がっている」印象を出すためゆっくり漂わせる（2026-09-03、デザイン指摘への対応）。
+   継続時間・移動量を1〜3で少しずつ変え、複数のブロブが揃って動いて見えないようにしている。 */
+@keyframes cv-bg-drift-1 {
+  0%,
+  100% {
+    transform: translate(-4%, -4%) scale(1);
+  }
+  50% {
+    transform: translate(9%, 7%) scale(1.18);
+  }
+}
+@keyframes cv-bg-drift-2 {
+  0%,
+  100% {
+    transform: translate(0%, 0%) scale(1);
+  }
+  50% {
+    transform: translate(-11%, 8%) scale(1.12);
+  }
+}
+@keyframes cv-bg-drift-3 {
+  0%,
+  100% {
+    transform: translate(0%, 0%) scale(1);
+  }
+  50% {
+    transform: translate(6%, -11%) scale(1.22);
+  }
+}
+.cv-bg-blob-1 {
+  animation: cv-bg-drift-1 21s ease-in-out infinite;
+}
+.cv-bg-blob-2 {
+  animation: cv-bg-drift-2 27s ease-in-out infinite;
+}
+.cv-bg-blob-3 {
+  animation: cv-bg-drift-3 24s ease-in-out infinite;
+}
