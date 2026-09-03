@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Loader2, X, Plus } from "lucide-react";
+import { ArrowLeft, Loader2, X, Plus, MessageSquare } from "lucide-react";
 import { useBroadcasterProfile, useBroadcasterTags } from "../lib/use-clip-ranking";
 import Footer from "./Footer";
 
@@ -114,6 +114,14 @@ export default function BroadcasterDetail() {
           {myTags.map((t) => (
             <span key={t} style={styles.myTagChip}>
               {t}
+              <Link
+                to={`/threads?new=${encodeURIComponent(t)}`}
+                style={styles.myTagThreadLink}
+                aria-label={`「${t}」についてスレを立てる/見る`}
+                title="このタグについてスレを立てる・見る"
+              >
+                <MessageSquare size={11} />
+              </Link>
               <button
                 onClick={() => removeTag(t)}
                 style={styles.myTagRemoveBtn}
@@ -248,6 +256,18 @@ const styles = {
     border: "1px solid #2E2E3A",
     borderRadius: 20,
     padding: "5px 6px 5px 12px",
+  },
+  myTagThreadLink: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "#2A2A36",
+    borderRadius: "50%",
+    width: 16,
+    height: 16,
+    color: "#AFA9EC",
+    flexShrink: 0,
+    textDecoration: "none",
   },
   myTagRemoveBtn: {
     display: "flex",

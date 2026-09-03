@@ -10,6 +10,8 @@ import ClipperList from "./components/ClipperList";
 import ClipperDetail from "./components/ClipperDetail";
 import ClipSearch from "./components/ClipSearch";
 import GeneralThread from "./components/GeneralThread";
+import TagThreadList from "./components/TagThreadList";
+import TagThreadDetail from "./components/TagThreadDetail";
 import AboutPage from "./components/AboutPage";
 import TermsPage from "./components/TermsPage";
 import PrivacyPage from "./components/PrivacyPage";
@@ -30,6 +32,8 @@ export default function App() {
         <Route path="/clippers/:creatorId" element={<ClipperDetail />} />
         <Route path="/search" element={<ClipSearch />} />
         <Route path="/general" element={<GeneralThread />} />
+        <Route path="/threads" element={<TagThreadList />} />
+        <Route path="/threads/:id" element={<TagThreadDetail />} />
         <Route path="/about" element={<AboutPage />} />
         <Route path="/terms" element={<TermsPage />} />
         <Route path="/privacy" element={<PrivacyPage />} />

@@ -858,6 +858,157 @@ export function useMyBroadcasterTags() {
   return { tags: Object.keys(tagMap).sort(), streamersByTag: tagMap, loading };
 }
 
+export interface TagThread {
+  id: string;
+  title: string;
+  created_at: string;
+  comment_count: number;
+}
+
+/**
+ * タグに関するユーザー投稿型のスレ機能（2026-09-03追加）。「ZETAというタグを付けたら、
+ * それについて話すスレを立てたい」という要望への対応。書き込みは全てsecurity definerの
+ * RPC経由（テーブルへの直接INSERTは許可していない、詳細はマイグレーション参照）。
+ */
+export function useTagThreads() {
+  const [threads, setThreads] = useState<TagThread[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase.rpc("get_tag_threads");
+    setThreads(data ?? []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  return { threads, loading, refresh };
+}
+
+/** スレを取得、無ければ作成する（get_or_create_tag_thread RPC）。タイトルの大文字小文字は区別しない。 */
+export function useGetOrCreateTagThread() {
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const getOrCreate = useCallback(async (title: string) => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await ensureAnonymousSession();
+      const { data, error } = await supabase.rpc("get_or_create_tag_thread", { thread_title: title });
+      if (error) {
+        setError(error.message);
+        return null;
+      }
+      return (data?.[0] as { id: string; title: string; created_at: string; is_new: boolean }) ?? null;
+    } catch {
+      setError("通信に失敗しました。ネットワークを確認してください");
+      return null;
+    } finally {
+      setSubmitting(false);
+    }
+  }, []);
+
+  return { getOrCreate, submitting, error };
+}
+
+/** タグスレ詳細ページのヘッダー表示用に、スレ1件の情報（タイトル等）だけを取得する */
+export function useTagThread(threadId: string) {
+  const [thread, setThread] = useState<TagThread | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const { data } = await supabase
+        .from("tag_threads")
+        .select("id, title, created_at")
+        .eq("id", threadId)
+        .maybeSingle();
+      if (cancelled) return;
+      setThread(data ? { ...data, comment_count: 0 } : null);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [threadId]);
+
+  return { thread, loading };
+}
+
+export interface TagThreadComment {
+  id: string;
+  display_name: string;
+  body: string;
+  created_at: string;
+  parent_id: string | null;
+}
+
+/** タグスレ詳細ページ用。コメントの取得・Realtime購読・投稿（post_tag_thread_comment RPC）を行う。 */
+export function useTagThreadComments(threadId: string) {
+  const [comments, setComments] = useState<TagThreadComment[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("tag_thread_comments")
+        .select("id, display_name, body, created_at, parent_id")
+        .eq("thread_id", threadId)
+        .eq("is_hidden", false)
+        .order("created_at", { ascending: true });
+      if (!cancelled) setComments(data ?? []);
+    })();
+
+    const channel = supabase
+      .channel(`tag-thread-comments:${threadId}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "tag_thread_comments", filter: `thread_id=eq.${threadId}` },
+        (payload) => {
+          setComments((prev) => [...prev, payload.new as TagThreadComment]);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, [threadId]);
+
+  const submit = useCallback(
+    async (body: string, displayName: string, parentId?: string | null) => {
+      setSubmitting(true);
+      setError(null);
+      try {
+        await ensureAnonymousSession();
+        const { error } = await supabase.rpc("post_tag_thread_comment", {
+          p_thread_id: threadId,
+          p_body: body,
+          p_display_name: displayName,
+          p_parent_id: parentId ?? null,
+        });
+        if (error) setError(error.message);
+      } catch {
+        setError("通信に失敗しました。ネットワークを確認してください");
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [threadId],
+  );
+
+  return { comments, submit, submitting, error };
+}
+
 export interface TopClipper {
   creator_id: string;
   creator_name: string;

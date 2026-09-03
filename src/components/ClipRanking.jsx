@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, Users, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, Smile, Calendar, Play, Flame } from "lucide-react";
+import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, Users, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, Smile, Calendar, Play, Flame, Hash } from "lucide-react";
 import {
   useClips,
   useReactions,
@@ -906,6 +906,10 @@ export default function ClipRanking() {
             <Link to="/general" className="cv-nav-link" style={styles.navLink}>
               <MessageSquare size={15} />
               総合スレ
+            </Link>
+            <Link to="/threads" className="cv-nav-link" style={styles.navLink}>
+              <Hash size={15} />
+              タグスレ
             </Link>
             {REACTIONS_ENABLED && (
               <Link to="/my-reactions" className="cv-nav-link" style={styles.navLink}>
