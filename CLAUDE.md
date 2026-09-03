@@ -656,6 +656,78 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
 
 
 
+## SEO強化とSNSシェア導線（2026-09-03追加）
+
+- 「訪問者数を増やすにはどうすればいいか」という相談から、SEOと共有導線の2本立てで対応した。
+
+### document.title/meta descriptionの動的更新
+
+- SPAのためindex.htmlのmetaは固定値のままで、クリップ/配信者/クリップ職人の個別ページも
+  ずっと同じタイトル・説明文しか出せていなかった（ブラウザタブの判別しづらさという実害もあった）。
+  `src/lib/use-document-meta.js`（`useDocumentMeta`フック）を追加し、`ClipDetail.jsx`/
+  `BroadcasterDetail.jsx`/`ClipperDetail.jsx`で個別の内容に書き換えるようにした。
+  ページ離脱時（unmount）にはモジュール読み込み時に記録しておいた初期値（index.htmlの値）へ
+  自動で戻す設計のため、他の静的ページ側は何も変更しなくてよい。
+  - `<link rel="canonical">`は`href`属性、`<meta>`は`content`属性と異なるため、
+    共通の`setMeta`ヘルパーは要素のタグ名で属性名を切り替えている。
+
+### SNSクローラー向け動的OGP（api/og/*）
+
+- Twitter/LINE/Discord/Slack等のリンク展開ボットはJSを実行しないため、上記のdocument.title
+  書き換えだけではシェア時のプレビュー（タイトル・画像）が個別クリップ等の内容にならない。
+  Vercelサーバーレス関数（`api/og/clip/[id].js`、`api/og/broadcaster/[name].js`、
+  `api/og/clipper/[id].js`）を追加し、Supabaseから該当データを取得してOGP専用の軽量HTMLを
+  返すようにした。`vercel.json`の`rewrites`で、User-Agentが主要クローラー
+  （Twitterbot/facebookexternalhit/Slackbot/Discordbot/LINE等、"bot"を含む一般的なUA全般）に
+  一致する場合だけこの関数へ振り分け、通常ユーザー・Googlebot（JSを実行するため直接SPAで
+  問題ない）はそのままSPAへ通す。og:imageはクリップのTwitchサムネイル/配信者・クリップ職人の
+  プロフィール画像をそのまま使う（画像生成の仕組みは作っていない）。
+- **ハマった点（重大）**: 既存の`vercel.json`にはSPA用のcatch-all rewrite
+  `"/((?!.*\\..*).*)" -> "/index.html"`（拡張子を含まないパスは全部SPAへ、直接URL入力時の
+  404対策として2026-09-03に追加済み）があったが、これが`/api/og/clip/xxx`や`/api/sitemap.xml`
+  のような拡張子なしの`/api/`配下のパスまで飲み込んでしまい、サーバーレス関数が一切呼ばれず
+  常にSPA本体が返っていた（一時的なデバッグ用エンドポイントで実際にSPAのHTMLが返ることを
+  確認して発覚）。`"/((?!api/|.*\\..*).*)"`のように`api/`始まりのパスを明示的に除外して解決。
+  **`vercel.json`にSPA用のcatch-all rewriteがある構成で`/api`配下のルートを追加する際は、
+  必ずこの除外パターンになっているか確認すること**。
+  - もう1点、`has`（User-Agentヘッダー等でのrewrite条件）の`value`は部分一致ではなく
+    正規表現の「全体一致」として評価されるようだったため、`"(bot|...)"`のような
+    部分文字列だけの指定だと一致しなかった。前後に`.*`を付けて
+    `".*(bot|...).*"`という形にして解決（本番でTwitterbotのUAを送って確認済み）。
+
+### 動的sitemap.xml
+
+- 静的ページのみだった`public/sitemap.xml`を廃止し、`api/sitemap.xml.js`
+  （サーバーレス関数、`vercel.json`のrewriteで`/sitemap.xml`にマッピング）に置き換えた。
+  静的ページ＋配信者全件（`tracked_broadcasters`）＋人気クリップ職人上位（`top_clippers_mv`、
+  上位3000）＋人気クリップ上位（`clips`のview_count上位、上位5000）を含む（本番実測で
+  合計9,924件、Googleのsitemap上限50,000件に対して十分小さい）。clips全件（54万件超）は
+  検索価値の低いクリップまで含めると非現実的な規模になるため対象外にした、という意図的な
+  スコープ判断。`Cache-Control: s-maxage=21600`で6時間キャッシュ。
+  - **ハマった点（重大、原因特定に時間がかかった）**: 実装直後、sitemapのURL件数が
+    毎回ちょうど3010件（静的10件+1000件×3）に固定されるバグが発生。当初「3クエリを
+    `Promise.all`で並列実行したのが原因では」と誤診断して直列実行に変更したが直らず、
+    実際の原因は**PostgRESTのプロジェクト側デフォルト行数上限（1000件）はクエリ文字列の
+    `limit=N`では超えられない**という、このプロジェクトで過去に何度も踏んでいる既知の罠
+    （「クリップ職人ランキング」節等参照）だった。3クエリとも`limit=3000`や`limit=5000`を
+    指定していたのに全部1000件で打ち切られており、たまたま合計値が近い数字になっていたため
+    「並列/直列」という誤った切り分けに時間を使ってしまった。**同じ症状（想定より少ない件数で
+    頭打ちになる）を見たら、まずこの1000件上限を疑うこと**。`api/_lib/supabase.js`に
+    `supabaseGetPaged`（Rangeヘッダーによるページング取得）を追加して解決。
+
+### シェアボタン
+
+- `src/components/ShareButtons.jsx`（新規、X/LINEで共有・リンクをコピーの3ボタン、
+  ブランドロゴは使わず`lucide-react`の`Share2`/`Link2`/`Check`アイコンのみ使用）を
+  クリップ/配信者/クリップ職人の各詳細ページに追加。X・LINEは公式のWeb Intent URL
+  （`twitter.com/intent/tweet`・`social-plugins.line.me/lineit/share`）を新規タブで開くだけの
+  実装で、認証・APIキー等は不要。リンクコピーは`navigator.clipboard.writeText`。
+  - **既知の制約**: リンクコピー機能はChrome拡張の自動操作（CDP経由のクリック）からは
+    ブラウザのクリップボード権限プロンプトが解決されずハングすることを確認した
+    （実機の人間のクリックでは通常どおり動作するはず、標準的な`navigator.clipboard`の
+    使い方であり実装自体に問題はない）。この制約により、この機能は自動テストでは
+    最終確認できていない。
+
 # ステアリング
 
 - git commitを行う際は、同じタイミングでリモート（origin）へのpushも必ず行うこと。ユーザーから別途pushを依頼されるのを待たない。
