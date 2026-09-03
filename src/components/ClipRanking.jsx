@@ -17,6 +17,7 @@ import {
   useTopClippersByPeriod,
   useTrendingClips,
   useActivityFeed,
+  useMyBroadcasterTags,
 } from "../lib/use-clip-ranking";
 import { REACTIONS_ENABLED } from "../lib/feature-flags";
 import Footer from "./Footer";
@@ -662,12 +663,16 @@ export default function ClipRanking() {
   const [selectedDay, setSelectedDay] = useState(() => new Date());
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState("views"); // views | newest | likes | comments
+  const [tagFilter, setTagFilter] = useState(""); // ""=絞り込みなし。自分で付けた配信者タグで絞り込む
+  const { tags: myTags, streamersByTag } = useMyBroadcasterTags();
+  const tagStreamerFilter = tagFilter ? streamersByTag[tagFilter] ?? [] : null;
   const { clips, loading, error: clipsError, totalCount } = useClips(
     PAGE_SIZE,
     period,
     period === "day" ? selectedDay : undefined,
     page,
     sortBy,
+    tagStreamerFilter,
   );
   const { clips: trendingClips, loading: trendingLoading } = useTrendingClips(5, 72);
   const { items: activityItems } = useActivityFeed(15);
@@ -783,10 +788,11 @@ export default function ClipRanking() {
   const { request: requestBroadcaster, submitting: requesting, result: requestResult } = useBroadcasterRequest();
   const { report: reportComment } = useCommentReport();
 
-  // 期間・日付・並び替え・検索条件が変わったら1ページ目に戻す（違うページに条件が引き継がれて空表示になるのを防ぐ）
+  // 期間・日付・並び替え・検索条件・タグ絞り込みが変わったら1ページ目に戻す
+  // （違うページに条件が引き継がれて空表示になるのを防ぐ）
   useEffect(() => {
     setPage(1);
-  }, [period, selectedDay, sortBy, searchQuery]);
+  }, [period, selectedDay, sortBy, searchQuery, tagFilter]);
 
   // コメントパネルを開いている間はEscで閉じられるようにし、背後のページスクロールを止める
   useEffect(() => {
@@ -871,64 +877,66 @@ export default function ClipRanking() {
         }
       `}</style>
 
-      <header className="cv-header" style={styles.header}>
-        <div>
-          <div style={styles.eyebrowRow}>
-            <span className="cv-live-dot" style={styles.liveDot} />
-            <span style={styles.eyebrow}>Twitchクリップの掲示板</span>
+      <div style={styles.stickyHeader}>
+        <header className="cv-header" style={styles.header}>
+          <div>
+            <div style={styles.eyebrowRow}>
+              <span className="cv-live-dot" style={styles.liveDot} />
+              <span style={styles.eyebrow}>Twitchクリップの掲示板</span>
+            </div>
+            <h1 style={styles.h1}>
+              <img src="/favicon.ico" alt="" style={styles.h1Icon} />
+              クリスレ
+            </h1>
+            <p style={styles.tagline}>みんなのお気に入りのクリップにコメントしてみよう！</p>
           </div>
-          <h1 style={styles.h1}>
-            <img src="/favicon.ico" alt="" style={styles.h1Icon} />
-            クリスレ
-          </h1>
-          <p style={styles.tagline}>みんなのお気に入りのクリップにコメントしてみよう！</p>
-        </div>
-        <div className="cv-header-controls" style={styles.headerControls}>
-          <div className="cv-nav-links" style={styles.headerLinks}>
-            <Link to="/broadcasters" className="cv-nav-link" style={styles.navLink}>
-              <Users size={15} />
-              配信者一覧
-            </Link>
-            <Link to="/clippers" className="cv-nav-link" style={styles.navLink}>
-              <Scissors size={15} />
-              クリップ職人
-            </Link>
-            <Link to="/search" className="cv-nav-link" style={styles.navLink}>
-              <Search size={15} />
-              クリップ検索
-            </Link>
-            <Link to="/general" className="cv-nav-link" style={styles.navLink}>
-              <MessageSquare size={15} />
-              総合スレ
-            </Link>
-            {REACTIONS_ENABLED && (
-              <Link to="/my-reactions" className="cv-nav-link" style={styles.navLink}>
-                <ListChecks size={15} />
-                評価した動画
+          <div className="cv-header-controls" style={styles.headerControls}>
+            <div className="cv-nav-links" style={styles.headerLinks}>
+              <Link to="/broadcasters" className="cv-nav-link" style={styles.navLink}>
+                <Users size={15} />
+                配信者一覧
               </Link>
-            )}
-            <Link to="/my-stamps" className="cv-nav-link" style={styles.navLink}>
-              <Smile size={15} />
-              スタンプ一覧
-            </Link>
-            <Link to="/favorites" className="cv-nav-link" style={styles.navLink}>
-              <Star size={15} />
-              お気に入り
-            </Link>
+              <Link to="/clippers" className="cv-nav-link" style={styles.navLink}>
+                <Scissors size={15} />
+                クリップ職人
+              </Link>
+              <Link to="/search" className="cv-nav-link" style={styles.navLink}>
+                <Search size={15} />
+                クリップ検索
+              </Link>
+              <Link to="/general" className="cv-nav-link" style={styles.navLink}>
+                <MessageSquare size={15} />
+                総合スレ
+              </Link>
+              {REACTIONS_ENABLED && (
+                <Link to="/my-reactions" className="cv-nav-link" style={styles.navLink}>
+                  <ListChecks size={15} />
+                  評価した動画
+                </Link>
+              )}
+              <Link to="/my-stamps" className="cv-nav-link" style={styles.navLink}>
+                <Smile size={15} />
+                スタンプ一覧
+              </Link>
+              <Link to="/favorites" className="cv-nav-link" style={styles.navLink}>
+                <Star size={15} />
+                お気に入り
+              </Link>
+            </div>
+            <div className="cv-search-box" style={styles.searchBox}>
+              <Search size={14} color="#6B6B78" />
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="配信者名で検索…"
+                style={styles.searchInput}
+              />
+            </div>
           </div>
-          <div className="cv-search-box" style={styles.searchBox}>
-            <Search size={14} color="#6B6B78" />
-            <input
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="配信者名で検索…"
-              style={styles.searchInput}
-            />
-          </div>
-        </div>
-      </header>
+        </header>
 
-      <ActivityTicker items={activityItems} />
+        <ActivityTicker items={activityItems} />
+      </div>
 
       <WeeklyClipperBoard clippers={weeklyClippers} loading={weeklyClippersLoading} />
 
@@ -1015,6 +1023,21 @@ export default function ClipRanking() {
                   </option>
                 ))}
               </select>
+              {myTags.length > 0 && (
+                <select
+                  value={tagFilter}
+                  onChange={(e) => setTagFilter(e.target.value)}
+                  style={styles.sortSelect}
+                  aria-label="マイタグで絞り込み"
+                >
+                  <option value="">すべての配信者</option>
+                  {myTags.map((t) => (
+                    <option key={t} value={t}>
+                      「{t}」タグのみ
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
 
             {clipsError && <div style={styles.errorBanner}>{clipsError}</div>}
@@ -1213,7 +1236,10 @@ const styles = {
   page: {
     position: "relative",
     zIndex: 0, // bgGlowのzIndex:-1をこの要素基準でスタッキングさせるために必須（position:relativeだけでは不十分）
-    overflow: "hidden",
+    // overflow:hiddenはここでは付けない。bgGlow自身がoverflow:hiddenでブロブをクリップしており、
+    // page側にも付けるとposition:stickyのヘッダーが「ビューポートではなくpage自身」を基準に
+    // スティッキングしてしまい機能しなくなる（overflow!=visibleな要素はsticky時のスクロール祖先に
+    // なってしまうため）。
     minHeight: "100vh",
     background: "#14141B",
     color: "#EDEDF2",
@@ -1237,6 +1263,12 @@ const styles = {
     borderRadius: "50%",
     filter: "blur(110px)",
     opacity: 0.22,
+  },
+  stickyHeader: {
+    position: "sticky",
+    top: 0,
+    zIndex: 5,
+    background: "#14141B",
   },
   header: {
     display: "flex",

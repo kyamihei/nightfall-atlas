@@ -290,6 +290,33 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   既存パターンに倣って`lucide-react`のアイコンを使うこと**（スタンプ名自体の文字列「すっご」等は
   絵文字ではなくテキストなので対象外）。
 
+## ヘッダー固定表示・配信者への個人タグ付け（2026-09-03追加）
+
+- トップページのヘッダー〜ライブ活動フィードまでを`position: sticky; top: 0`でまとめて固定表示に変更
+  （`ClipRanking.jsx`の`styles.stickyHeader`、`<header>`と`<ActivityTicker>`を1つのdivで囲む）。
+  - **ハマった点**: `page`要素に付けていた`overflow: hidden`（背景ブロブ演出のためのもの）が
+    残っていると、sticky要素は「overflowがvisibleでない最も近い祖先」を基準にスティッキングして
+    しまうため、`page`自身が非スクロールの巨大な高さを持つ結果スティッキングが機能しなくなる。
+    背景ブロブのクリップは`bgGlow`自身の`overflow: hidden`だけで十分だったため、`page`側からは
+    `overflow: hidden`を削除して解決。
+- 配信者への個人タグ付け機能を追加。「お気に入りの配信者だけ見たい」「いまやってるイベントの
+  参加者だけ見たい」という要望に対応。`broadcaster_tags`テーブル（anon_id・streamer・tagの3列、
+  本人のみ閲覧・追加・削除可、`tracked_broadcasters.tag`＝運営が設定する公開タグとは別物）を追加
+  （`20260903120000_broadcaster_tags.sql`）。
+  - `BroadcasterDetail.jsx`にタグの追加・削除UI（チップ表示、`useBroadcasterTags`フック）を追加。
+  - トップページ（`ClipRanking.jsx`）に、自分が使っているタグで配信者を絞り込むセレクターを追加
+    （`useMyBroadcasterTags`フックで自分の全タグ→配信者名の対応を取得し、選択中のタグに紐づく
+    配信者名の配列を`get_ranked_clips`の新引数`streamer_filter`へ渡す）。タグを1つも持っていない
+    ユーザーにはセレクター自体を表示しない。
+  - `get_ranked_clips`に`streamer_filter text[] default null`を追加（全6分岐のWHERE句・件数計算に
+    `and (streamer_filter is null or c.streamer = any(streamer_filter))`を追加）。配信者一覧の
+    検索ボックスで踏んだのと同じ「クライアント側だけの絞り込みはページネーションを壊す」問題を
+    避けるため、必ずDB側（RPC）で絞り込む設計にした。`clips.streamer`に索引（`idx_clips_streamer`）
+    が無かったため追加、追加前は`streamer = any(...)`がstatement_timeout（3秒）を超えていた
+    （索引追加後は実測0.2〜0.6秒）。引数を追加する既存RPCの拡張なので、旧シグネチャの
+    `drop function if exists`を忘れないこと（この罠は本プロジェクトで複数回踏んでいる、
+    「クリップ職人ランキング」節等参照）。
+
 ## 背景の装飾ブロブ演出（2026-09-03追加）
 
 - ライブ活動フィードとは別に、「背景が寂しい、嘘でもいいので盛り上がっている雰囲気にしたい」という

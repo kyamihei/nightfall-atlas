@@ -36,6 +36,9 @@ create index if not exists idx_clips_view_count_synced_at on clips(view_count_sy
 -- ライブ活動フィードの「新着クリップ」枠（created_at降順で取得）用
 create index if not exists idx_clips_created_at on clips(created_at desc);
 
+-- get_ranked_clipsの配信者タグ絞り込み（streamer_filter, broadcaster_tags参照）用
+create index if not exists idx_clips_streamer on clips(streamer);
+
 create index if not exists idx_clips_period_ranking
   on clips(twitch_created_at desc, view_count desc);
 
@@ -97,6 +100,21 @@ begin
     alter publication supabase_realtime add table clip_reaction_stamps;
   end if;
 end $$;
+
+-- 配信者への個人タグ付け（「お気に入り配信者だけ見たい」「イベント参加者だけ見たい」等の
+-- 絞り込みのため、2026-09-03追加）。tracked_broadcasters.tag（運営が設定する公開タグ）とは別物で、
+-- こちらは完全に個人用（非公開）。同じ配信者に複数タグを付けられる。
+create table if not exists broadcaster_tags (
+  id uuid primary key default gen_random_uuid(),
+  anon_id uuid not null,
+  streamer text not null,
+  tag text not null check (char_length(tag) between 1 and 20),
+  created_at timestamptz default now(),
+  unique (anon_id, streamer, tag)
+);
+
+create index if not exists idx_broadcaster_tags_anon on broadcaster_tags(anon_id);
+create index if not exists idx_broadcaster_tags_anon_tag on broadcaster_tags(anon_id, tag);
 
 -- 匿名コメント
 create table if not exists comments (
@@ -212,6 +230,7 @@ alter table clips enable row level security;
 alter table reactions enable row level security;
 alter table favorites enable row level security;
 alter table clip_reaction_stamps enable row level security;
+alter table broadcaster_tags enable row level security;
 alter table comments enable row level security;
 alter table comment_reports enable row level security;
 alter table tracked_broadcasters enable row level security;
@@ -296,6 +315,19 @@ create policy "clip_reaction_stamps_insert_own" on clip_reaction_stamps
 
 drop policy if exists "clip_reaction_stamps_delete_own" on clip_reaction_stamps;
 create policy "clip_reaction_stamps_delete_own" on clip_reaction_stamps
+  for delete using (anon_id = auth.uid());
+
+-- broadcaster_tags: 完全に個人用のデータなので、閲覧・追加・削除すべて本人のみ（公開readにしない）
+drop policy if exists "broadcaster_tags_select_own" on broadcaster_tags;
+create policy "broadcaster_tags_select_own" on broadcaster_tags
+  for select using (anon_id = auth.uid());
+
+drop policy if exists "broadcaster_tags_insert_own" on broadcaster_tags;
+create policy "broadcaster_tags_insert_own" on broadcaster_tags
+  for insert with check (anon_id = auth.uid());
+
+drop policy if exists "broadcaster_tags_delete_own" on broadcaster_tags;
+create policy "broadcaster_tags_delete_own" on broadcaster_tags
   for delete using (anon_id = auth.uid());
 
 -- comments: 非表示でないものは誰でも閲覧可。挿入は誰でも可（Edge Functionでレート制限・NGワード検査を挟む前提）
@@ -634,7 +666,8 @@ create or replace function get_ranked_clips(
   period_end timestamptz default 'infinity',
   sort_by text default 'views',
   page_limit int default 20,
-  page_offset int default 0
+  page_offset int default 0,
+  streamer_filter text[] default null
 )
 returns table(
   id text,
@@ -655,7 +688,7 @@ returns table(
 ) as $$
 declare
   v_total bigint;
-  v_unbounded boolean := period_start = '-infinity'::timestamptz and period_end = 'infinity'::timestamptz;
+  v_unbounded boolean := period_start = '-infinity'::timestamptz and period_end = 'infinity'::timestamptz and streamer_filter is null;
 begin
   if sort_by = 'likes' then
     -- いいね順・コメント数順は、反応/コメントが1件も付いていないクリップまで含めて
@@ -663,6 +696,7 @@ begin
     -- statement_timeout(3s)を超えるため、reactions側を起点にする。
     -- 「反応が0件のクリップ」はこのランキングには現れない仕様とする
     -- （エンゲージメント順のランキングとしては一般的な挙動で、性能上も現実的）。
+    -- streamer_filterは配信者への個人タグ絞り込み用（省略時は絞り込みなし、idx_clips_streamer使用）。
     return query
       with agg as (
         select r.clip_id,
@@ -678,6 +712,7 @@ begin
         where c.twitch_created_at >= period_start
           and c.twitch_created_at < period_end
           and c.id <> '__general_thread__'
+          and (streamer_filter is null or c.streamer = any(streamer_filter))
       )
       select
         m.id, m.title, m.streamer, m.game, m.view_count, m.thumbnail_url, m.twitch_created_at,
@@ -702,6 +737,7 @@ begin
         where c.twitch_created_at >= period_start
           and c.twitch_created_at < period_end
           and c.id <> '__general_thread__'
+          and (streamer_filter is null or c.streamer = any(streamer_filter))
       )
       select
         m.id, m.title, m.streamer, m.game, m.view_count, m.thumbnail_url, m.twitch_created_at,
@@ -727,6 +763,7 @@ begin
         where c.twitch_created_at >= period_start
           and c.twitch_created_at < period_end
           and c.id <> '__general_thread__'
+          and (streamer_filter is null or c.streamer = any(streamer_filter))
       )
       select
         m.id, m.title, m.streamer, m.game, m.view_count, m.thumbnail_url, m.twitch_created_at,
@@ -751,6 +788,7 @@ begin
         where c.twitch_created_at >= period_start
           and c.twitch_created_at < period_end
           and c.id <> '__general_thread__'
+          and (streamer_filter is null or c.streamer = any(streamer_filter))
       )
       select
         m.id, m.title, m.streamer, m.game, m.view_count, m.thumbnail_url, m.twitch_created_at,
@@ -763,14 +801,15 @@ begin
   elsif sort_by = 'newest' then
     -- 「全期間」（絞り込みなし）の正確なCOUNT(*)はclips全件を走査するため、
     -- pg_class.reltuples（統計情報ベースの概算値、O(1)）で代用する。
-    -- 期間で絞り込んでいる場合は対象行数が少なく、正確なCOUNTでも安価なためそのまま数える。
+    -- 期間・配信者いずれかで絞り込んでいる場合は対象行数が少なく、正確なCOUNTでも安価なためそのまま数える。
     if v_unbounded then
       select reltuples::bigint into v_total from pg_class where oid = 'clips'::regclass;
     else
       select count(*) into v_total
       from clips c
       where c.twitch_created_at >= period_start
-        and c.twitch_created_at < period_end;
+        and c.twitch_created_at < period_end
+        and (streamer_filter is null or c.streamer = any(streamer_filter));
     end if;
 
     -- ORDER BYの列をCASE式で包むと索引が使われなくなるため、newest/views は
@@ -790,6 +829,7 @@ begin
       where c.twitch_created_at >= period_start
         and c.twitch_created_at < period_end
         and c.id <> '__general_thread__'
+        and (streamer_filter is null or c.streamer = any(streamer_filter))
       order by c.twitch_created_at desc, c.id
       limit page_limit offset page_offset;
   else
@@ -799,7 +839,8 @@ begin
       select count(*) into v_total
       from clips c
       where c.twitch_created_at >= period_start
-        and c.twitch_created_at < period_end;
+        and c.twitch_created_at < period_end
+        and (streamer_filter is null or c.streamer = any(streamer_filter));
     end if;
 
     return query
@@ -816,6 +857,7 @@ begin
       where c.twitch_created_at >= period_start
         and c.twitch_created_at < period_end
         and c.id <> '__general_thread__'
+        and (streamer_filter is null or c.streamer = any(streamer_filter))
       order by c.view_count desc, c.id
       limit page_limit offset page_offset;
   end if;

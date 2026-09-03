@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Loader2 } from "lucide-react";
-import { useBroadcasterProfile } from "../lib/use-clip-ranking";
+import { ArrowLeft, Loader2, X, Plus } from "lucide-react";
+import { useBroadcasterProfile, useBroadcasterTags } from "../lib/use-clip-ranking";
 import Footer from "./Footer";
 
 const PERIOD_TABS = [
@@ -46,6 +46,15 @@ export default function BroadcasterDetail() {
     period,
     period === "day" ? selectedDay : undefined,
   );
+  const { tags: myTags, addTag, removeTag } = useBroadcasterTags(streamer);
+  const [tagDraft, setTagDraft] = useState("");
+
+  function handleAddTag() {
+    const trimmed = tagDraft.trim();
+    if (!trimmed) return;
+    addTag(trimmed);
+    setTagDraft("");
+  }
 
   if (loading) {
     return (
@@ -98,6 +107,40 @@ export default function BroadcasterDetail() {
           </div>
         </div>
       </header>
+
+      <div style={styles.myTagsSection}>
+        <p style={styles.myTagsLabel}>マイタグ（自分だけに表示・お気に入りやイベント参加者などの絞り込みに使えます）</p>
+        <div style={styles.myTagsRow}>
+          {myTags.map((t) => (
+            <span key={t} style={styles.myTagChip}>
+              {t}
+              <button
+                onClick={() => removeTag(t)}
+                style={styles.myTagRemoveBtn}
+                aria-label={`「${t}」タグを削除`}
+                title="タグを削除"
+              >
+                <X size={11} />
+              </button>
+            </span>
+          ))}
+          <div style={styles.myTagInputRow}>
+            <input
+              value={tagDraft}
+              onChange={(e) => setTagDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleAddTag();
+              }}
+              placeholder="タグを追加…"
+              style={styles.myTagInput}
+              maxLength={20}
+            />
+            <button onClick={handleAddTag} style={styles.myTagAddBtn} aria-label="タグを追加">
+              <Plus size={13} />
+            </button>
+          </div>
+        </div>
+      </div>
 
       <div style={styles.periodTabs}>
         {PERIOD_TABS.map((t) => (
@@ -191,6 +234,55 @@ const styles = {
   headerRow: { display: "flex", alignItems: "center", gap: 16 },
   avatar: { width: 64, height: 64, borderRadius: "50%", objectFit: "cover", flexShrink: 0 },
   avatarFallback: { width: 64, height: 64, borderRadius: "50%", background: "#20202B", flexShrink: 0 },
+  myTagsSection: { marginBottom: 18 },
+  myTagsLabel: { fontSize: 11.5, color: "#6B6B78", margin: "0 0 8px" },
+  myTagsRow: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 },
+  myTagChip: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 12.5,
+    fontWeight: 500,
+    color: "#EDEDF2",
+    background: "#20202B",
+    border: "1px solid #2E2E3A",
+    borderRadius: 20,
+    padding: "5px 6px 5px 12px",
+  },
+  myTagRemoveBtn: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "#2A2A36",
+    border: "none",
+    borderRadius: "50%",
+    width: 16,
+    height: 16,
+    color: "#9797A6",
+    flexShrink: 0,
+  },
+  myTagInputRow: { display: "flex", alignItems: "center", gap: 6 },
+  myTagInput: {
+    background: "#1C1C26",
+    border: "1px solid #2E2E3A",
+    borderRadius: 20,
+    padding: "6px 14px",
+    fontSize: 12.5,
+    color: "#EDEDF2",
+    width: 140,
+  },
+  myTagAddBtn: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "#1C1C26",
+    border: "1px solid #2E2E3A",
+    borderRadius: "50%",
+    width: 26,
+    height: 26,
+    color: "#C4C4D0",
+    flexShrink: 0,
+  },
   periodTabs: { display: "flex", gap: 6, marginBottom: 12 },
   dayTabs: { display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 16 },
   tab: {

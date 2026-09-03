@@ -78,6 +78,7 @@ export function useClips(
   referenceDate?: Date,
   page = 1,
   sortBy: SortBy = "views",
+  streamerFilter?: string[] | null,
 ) {
   const [clips, setClips] = useState<Clip[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -101,6 +102,9 @@ export function useClips(
       };
       if (start) rpcArgs.period_start = start;
       if (end) rpcArgs.period_end = end;
+      // 空配列/未指定時はキーごと省略する（他のRPC引数と同じ理由。nullを明示的に渡すと
+      // PostgRESTのプリペアードステートメントが汎用実行計画になり索引が使われなくなる恐れがある）
+      if (streamerFilter && streamerFilter.length > 0) rpcArgs.streamer_filter = streamerFilter;
 
       const { data, error } = await supabase.rpc("get_ranked_clips", rpcArgs);
       if (cancelled) return;
@@ -129,7 +133,10 @@ export function useClips(
     return () => {
       cancelled = true;
     };
-  }, [limit, period, referenceDate?.getTime(), page, sortBy]);
+    // streamerFilterは配列（参照型）なのでuseEffectの依存配列に直接入れず、
+    // 内容を表す安定した文字列キーに変換してから使う（他のクリップID配列を渡すフックと同じ対策）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [limit, period, referenceDate?.getTime(), page, sortBy, streamerFilter?.join(",")]);
 
   return { clips, loading, error, totalCount };
 }
@@ -760,6 +767,95 @@ export function useTopBroadcasters(limit = 20, offset = 0, searchQuery = "") {
   }, [limit, offset, searchQuery]);
 
   return { broadcasters, loading };
+}
+
+/**
+ * 配信者への個人タグ（非公開）。「お気に入り配信者だけ見たい」「いまやってるイベントの
+ * 参加者だけ見たい」等の絞り込みを実現するために追加（2026-09-03）。
+ * BroadcasterDetail.jsxでの追加/削除・表示に使う。tracked_broadcasters.tag（運営が設定する
+ * 公開タグ）とは別物で、broadcaster_tagsテーブル（本人のみ閲覧可）を使う。
+ */
+export function useBroadcasterTags(streamer: string) {
+  const [tags, setTags] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    const user = await ensureAnonymousSession();
+    const { data } = await supabase
+      .from("broadcaster_tags")
+      .select("tag")
+      .eq("anon_id", user.id)
+      .eq("streamer", streamer)
+      .order("created_at", { ascending: true });
+    setTags((data ?? []).map((row) => row.tag as string));
+    setLoading(false);
+  }, [streamer]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const addTag = useCallback(
+    async (tag: string) => {
+      const trimmed = tag.trim().slice(0, 20);
+      if (!trimmed) return;
+      const user = await ensureAnonymousSession();
+      const { error } = await supabase
+        .from("broadcaster_tags")
+        .insert({ anon_id: user.id, streamer, tag: trimmed });
+      // unique制約(anon_id, streamer, tag)違反 = 既に同じタグが付いている。エラー扱いしない
+      if (error && error.code !== "23505") return;
+      await refresh();
+    },
+    [streamer, refresh],
+  );
+
+  const removeTag = useCallback(
+    async (tag: string) => {
+      const user = await ensureAnonymousSession();
+      await supabase
+        .from("broadcaster_tags")
+        .delete()
+        .eq("anon_id", user.id)
+        .eq("streamer", streamer)
+        .eq("tag", tag);
+      await refresh();
+    },
+    [streamer, refresh],
+  );
+
+  return { tags, loading, addTag, removeTag };
+}
+
+/**
+ * 自分が付けた配信者タグの一覧（種類・配信者名の対応）。トップページのタグ絞り込み
+ * セレクターに使う。RLSが本人の行しか返さない前提で、anon_idでの絞り込みは省略している。
+ */
+export function useMyBroadcasterTags() {
+  const [tagMap, setTagMap] = useState<Record<string, string[]>>({}); // tag -> streamer[]
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      await ensureAnonymousSession();
+      const { data } = await supabase.from("broadcaster_tags").select("tag, streamer");
+      if (cancelled) return;
+      const next: Record<string, string[]> = {};
+      for (const row of (data ?? []) as { tag: string; streamer: string }[]) {
+        (next[row.tag] ??= []).push(row.streamer);
+      }
+      setTagMap(next);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { tags: Object.keys(tagMap).sort(), streamersByTag: tagMap, loading };
 }
 
 export interface TopClipper {
