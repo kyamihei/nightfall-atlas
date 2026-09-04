@@ -24,6 +24,7 @@ import {
 } from "../lib/use-clip-ranking";
 import { REACTIONS_ENABLED } from "../lib/feature-flags";
 import { useActivityFeedPrefs, ACTIVITY_FEED_TYPES } from "../lib/use-activity-feed-prefs";
+import { numberCommentsForDisplay, formatThreadTime } from "../lib/thread-format";
 import Footer from "./Footer";
 import BackgroundGlow from "./BackgroundGlow";
 
@@ -92,15 +93,6 @@ function getRankAccent(rank) {
   return RANK_ACCENTS[rank] || null;
 }
 
-function timeAgo(ts) {
-  const diff = Math.max(0, Date.now() - ts);
-  const min = Math.floor(diff / 60000);
-  if (min < 1) return "たった今";
-  if (min < 60) return `${min}分前`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}時間前`;
-  return `${Math.floor(hr / 24)}日前`;
-}
 
 function ClipRow({
   clip,
@@ -387,12 +379,8 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
   const commentIds = useMemo(() => comments.map((c) => c.id), [comments]);
   const memberBadges = useCommentMemberBadges(commentIds);
 
-  const topLevel = comments.filter((c) => !c.parent_id);
-  const repliesByParent = comments.reduce((acc, c) => {
-    if (!c.parent_id) return acc;
-    (acc[c.parent_id] ??= []).push(c);
-    return acc;
-  }, {});
+  // 5ch風にレス番号を振り、新しい順（上が最新）で表示する（2026-09-04、ユーザー要望）。
+  const { display: displayComments, numberById } = numberCommentsForDisplay(comments);
 
   function handleSubmit() {
     const body = draft.trim();
@@ -406,18 +394,20 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
     setReplyTo(null);
   }
 
-  function renderComment(c, isReply) {
+  function renderComment(c) {
     const alreadyReported = reportedIds.has(c.id);
+    const parentNumber = c.parent_id ? numberById.get(c.parent_id) : null;
     return (
-      <div key={c.id} style={isReply ? styles.commentItemReply : styles.commentItem}>
+      <div key={c.id} style={styles.commentItem}>
         <div style={styles.commentHead}>
+          <span style={styles.postNumber}>{c.number}</span>
           <span style={styles.commentName}>
             {c.display_name}
             {memberBadges[c.id] && <span style={styles.memberBadge}>#{memberBadges[c.id]}</span>}
           </span>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={styles.commentTime}>{timeAgo(new Date(c.created_at).getTime())}</span>
-            {!isReply && (
+          <span style={styles.commentTime}>{formatThreadTime(c.created_at)}</span>
+          <div style={styles.commentHeadActions}>
+            {!c.parent_id && (
               <button
                 onClick={() => setReplyTo({ id: c.id, display_name: c.display_name })}
                 style={styles.replyBtn}
@@ -425,6 +415,7 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
                 title="このコメントに返信"
               >
                 <CornerUpLeft size={12} />
+                レス
               </button>
             )}
             <button
@@ -441,7 +432,10 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
             </button>
           </div>
         </div>
-        <p style={styles.commentBody}>{c.body}</p>
+        <p style={styles.commentBody}>
+          {parentNumber && <span style={styles.quoteRef}>&gt;&gt;{parentNumber}</span>}
+          {c.body}
+        </p>
       </div>
     );
   }
@@ -463,16 +457,7 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
         {comments.length === 0 && (
           <p style={styles.noComment}>まだコメントはありません。最初のコメントを投稿してみましょう。</p>
         )}
-        {topLevel.map((c) => (
-          <div key={c.id}>
-            {renderComment(c, false)}
-            {(repliesByParent[c.id] ?? []).map((r) => (
-              <div key={r.id} style={styles.replyIndent}>
-                {renderComment(r, true)}
-              </div>
-            ))}
-          </div>
-        ))}
+        {displayComments.map((c) => renderComment(c))}
       </div>
 
       <div style={styles.commentForm}>
@@ -1996,20 +1981,20 @@ const styles = {
     alignItems: "center",
     flexShrink: 0,
   },
+  // 5ch風のフラットな1レス表示（カード無し、罫線区切りのみ）
   commentList: {
     flex: 1,
     overflowY: "auto",
     display: "flex",
     flexDirection: "column",
-    gap: 10,
+    borderTop: "1px solid #24242F",
     marginBottom: 14,
   },
-  noComment: { fontSize: 13, color: "#6B6B78", margin: 0 },
-  commentItem: { background: "#20202B", borderRadius: 8, padding: "8px 10px", marginBottom: 6 },
-  commentItemReply: { background: "#1C1C26", borderRadius: 8, padding: "7px 10px" },
-  replyIndent: { marginLeft: 16, paddingLeft: 10, borderLeft: "2px solid #2A2A36", marginBottom: 6 },
-  commentHead: { display: "flex", justifyContent: "space-between", marginBottom: 3 },
-  commentName: { fontSize: 12.5, fontWeight: 500, color: "#C4C4D0" },
+  noComment: { fontSize: 13, color: "#6B6B78", margin: "20px 0" },
+  commentItem: { padding: "10px 2px", borderBottom: "1px solid #24242F" },
+  commentHead: { display: "flex", alignItems: "baseline", flexWrap: "wrap", gap: "4px 8px", marginBottom: 4 },
+  postNumber: { fontSize: 12.5, fontWeight: 700, color: "#FF4D6D", fontFamily: "'Consolas', monospace" },
+  commentName: { fontSize: 12.5, fontWeight: 600, color: "#5DCAA5" },
   memberBadge: {
     display: "inline-block",
     marginLeft: 6,
@@ -2022,22 +2007,26 @@ const styles = {
     padding: "1px 6px",
     verticalAlign: 1,
   },
-  commentTime: { fontSize: 11.5, color: "#5A5A66" },
-  commentBody: { fontSize: 13.5, margin: 0, lineHeight: 1.5, color: "#DADAE2" },
+  commentTime: { fontSize: 11.5, color: "#6B6B78", fontFamily: "'Consolas', monospace" },
+  commentHeadActions: { display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" },
+  commentBody: { fontSize: 13.5, margin: 0, lineHeight: 1.7, color: "#DADAE2", whiteSpace: "pre-wrap" },
+  quoteRef: { color: "#5B8DEF", marginRight: 6 },
   reportBtn: {
     background: "transparent",
     border: "none",
-    padding: 2,
+    padding: 0,
     display: "flex",
     alignItems: "center",
   },
   replyBtn: {
     background: "transparent",
     border: "none",
-    padding: 2,
+    padding: 0,
     display: "flex",
     alignItems: "center",
+    gap: 3,
     color: "#6B6B78",
+    fontSize: 11.5,
   },
   replyBanner: {
     display: "flex",

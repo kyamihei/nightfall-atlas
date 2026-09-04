@@ -17,6 +17,7 @@ import {
 import { REACTIONS_ENABLED } from "../lib/feature-flags";
 import { useDocumentMeta } from "../lib/use-document-meta";
 import { useSmartBack } from "../lib/use-smart-back";
+import { numberCommentsForDisplay, formatThreadTime } from "../lib/thread-format";
 import Footer from "./Footer";
 import BackgroundGlow from "./BackgroundGlow";
 import ShareButtons from "./ShareButtons";
@@ -34,16 +35,6 @@ function formatDate(iso) {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-function timeAgo(ts) {
-  const diff = Math.max(0, Date.now() - ts);
-  const min = Math.floor(diff / 60000);
-  if (min < 1) return "たった今";
-  if (min < 60) return `${min}分前`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}時間前`;
-  return `${Math.floor(hr / 24)}日前`;
 }
 
 export default function ClipDetail() {
@@ -84,12 +75,8 @@ export default function ClipDetail() {
   const [reportedIds, setReportedIds] = useState(new Set());
   const [replyTo, setReplyTo] = useState(null); // { id, display_name } | null
 
-  const topLevelComments = comments.filter((c) => !c.parent_id);
-  const repliesByParent = comments.reduce((acc, c) => {
-    if (!c.parent_id) return acc;
-    (acc[c.parent_id] ??= []).push(c);
-    return acc;
-  }, {});
+  // 5ch風にレス番号を振り、新しい順（上が最新）で表示する（2026-09-04、ユーザー要望）。
+  const { display: displayComments, numberById } = numberCommentsForDisplay(comments);
 
   function handleSubmit() {
     const body = draft.trim();
@@ -107,6 +94,49 @@ export default function ClipDetail() {
     if (reportedIds.has(commentId)) return;
     setReportedIds((prev) => new Set(prev).add(commentId));
     reportComment(commentId);
+  }
+
+  function renderComment(c) {
+    const alreadyReported = reportedIds.has(c.id);
+    const parentNumber = c.parent_id ? numberById.get(c.parent_id) : null;
+    return (
+      <div key={c.id} style={styles.commentItem}>
+        <div style={styles.commentHead}>
+          <span style={styles.postNumber}>{c.number}</span>
+          <span style={styles.commentName}>
+            {c.display_name}
+            {memberBadges[c.id] && <span style={styles.memberBadge}>#{memberBadges[c.id]}</span>}
+          </span>
+          <span style={styles.commentTime}>{formatThreadTime(c.created_at)}</span>
+          <div style={styles.commentHeadActions}>
+            {!c.parent_id && (
+              <button
+                onClick={() => setReplyTo({ id: c.id, display_name: c.display_name })}
+                style={styles.replyBtn}
+                aria-label="返信"
+                title="このコメントに返信"
+              >
+                <CornerUpLeft size={12} />
+                レス
+              </button>
+            )}
+            <button
+              onClick={() => handleReport(c.id)}
+              disabled={alreadyReported}
+              style={{ ...styles.reportBtn, color: alreadyReported ? "#4A4A54" : "#6B6B78" }}
+              aria-label="コメントを通報"
+              title={alreadyReported ? "通報済み" : "不適切なコメントを通報"}
+            >
+              <Flag size={12} />
+            </button>
+          </div>
+        </div>
+        <p style={styles.commentBody}>
+          {parentNumber && <span style={styles.quoteRef}>&gt;&gt;{parentNumber}</span>}
+          {c.body}
+        </p>
+      </div>
+    );
   }
 
   if (loading) {
@@ -266,76 +296,7 @@ export default function ClipDetail() {
           {comments.length === 0 && (
             <p style={styles.noComment}>まだコメントはありません。最初のコメントを投稿してみましょう。</p>
           )}
-          {topLevelComments.map((c) => {
-            const alreadyReported = reportedIds.has(c.id);
-            return (
-              <div key={c.id}>
-                <div style={styles.commentItem}>
-                  <div style={styles.commentHead}>
-                    <span style={styles.commentName}>
-                      {c.display_name}
-                      {memberBadges[c.id] && <span style={styles.memberBadge}>#{memberBadges[c.id]}</span>}
-                    </span>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={styles.commentTime}>{timeAgo(new Date(c.created_at).getTime())}</span>
-                      <button
-                        onClick={() => setReplyTo({ id: c.id, display_name: c.display_name })}
-                        style={styles.replyBtn}
-                        aria-label="返信"
-                        title="このコメントに返信"
-                      >
-                        <CornerUpLeft size={12} />
-                      </button>
-                      <button
-                        onClick={() => handleReport(c.id)}
-                        disabled={alreadyReported}
-                        style={{
-                          ...styles.reportBtn,
-                          color: alreadyReported ? "#4A4A54" : "#6B6B78",
-                        }}
-                        aria-label="コメントを通報"
-                        title={alreadyReported ? "通報済み" : "不適切なコメントを通報"}
-                      >
-                        <Flag size={12} />
-                      </button>
-                    </div>
-                  </div>
-                  <p style={styles.commentBody}>{c.body}</p>
-                </div>
-                {(repliesByParent[c.id] ?? []).map((r) => {
-                  const replyReported = reportedIds.has(r.id);
-                  return (
-                    <div key={r.id} style={styles.replyIndent}>
-                      <div style={styles.commentItemReply}>
-                        <div style={styles.commentHead}>
-                          <span style={styles.commentName}>
-                            {r.display_name}
-                            {memberBadges[r.id] && <span style={styles.memberBadge}>#{memberBadges[r.id]}</span>}
-                          </span>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            <span style={styles.commentTime}>{timeAgo(new Date(r.created_at).getTime())}</span>
-                            <button
-                              onClick={() => handleReport(r.id)}
-                              disabled={replyReported}
-                              style={{
-                                ...styles.reportBtn,
-                                color: replyReported ? "#4A4A54" : "#6B6B78",
-                              }}
-                              aria-label="コメントを通報"
-                              title={replyReported ? "通報済み" : "不適切なコメントを通報"}
-                            >
-                              <Flag size={12} />
-                            </button>
-                          </div>
-                        </div>
-                        <p style={styles.commentBody}>{r.body}</p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })}
+          {displayComments.map((c) => renderComment(c))}
         </div>
 
         <div style={styles.commentForm}>
@@ -494,13 +455,13 @@ const styles = {
   },
   commentSection: { borderTop: "1px solid #24242F", paddingTop: 20 },
   commentHeading: { fontSize: 15, fontWeight: 500, margin: "0 0 14px" },
-  commentList: { display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 },
-  noComment: { fontSize: 13, color: "#6B6B78", margin: 0 },
-  commentItem: { background: "#1C1C26", border: "1px solid #24242F", borderRadius: 8, padding: "10px 12px" },
-  commentItemReply: { background: "#18181F", border: "1px solid #22222C", borderRadius: 8, padding: "9px 12px" },
-  replyIndent: { marginLeft: 20, paddingLeft: 12, borderLeft: "2px solid #24242F", marginTop: 8 },
-  commentHead: { display: "flex", justifyContent: "space-between", marginBottom: 3 },
-  commentName: { fontSize: 12.5, fontWeight: 500, color: "#C4C4D0" },
+  // 5ch風のフラットな1レス表示（カード無し、罫線区切りのみ）
+  commentList: { display: "flex", flexDirection: "column", borderTop: "1px solid #24242F", marginBottom: 16 },
+  noComment: { fontSize: 13, color: "#6B6B78", margin: "20px 0" },
+  commentItem: { padding: "10px 2px", borderBottom: "1px solid #24242F" },
+  commentHead: { display: "flex", alignItems: "baseline", flexWrap: "wrap", gap: "4px 8px", marginBottom: 4 },
+  postNumber: { fontSize: 12.5, fontWeight: 700, color: "#FF4D6D", fontFamily: "'Consolas', monospace" },
+  commentName: { fontSize: 12.5, fontWeight: 600, color: "#5DCAA5" },
   memberBadge: {
     display: "inline-block",
     marginLeft: 6,
@@ -513,10 +474,21 @@ const styles = {
     padding: "1px 6px",
     verticalAlign: 1,
   },
-  commentTime: { fontSize: 11.5, color: "#5A5A66" },
-  commentBody: { fontSize: 13.5, margin: 0, lineHeight: 1.5, color: "#DADAE2" },
-  reportBtn: { background: "transparent", border: "none", padding: 2, display: "flex", alignItems: "center" },
-  replyBtn: { background: "transparent", border: "none", padding: 2, display: "flex", alignItems: "center", color: "#6B6B78" },
+  commentTime: { fontSize: 11.5, color: "#6B6B78", fontFamily: "'Consolas', monospace" },
+  commentHeadActions: { display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" },
+  commentBody: { fontSize: 13.5, margin: 0, lineHeight: 1.7, color: "#DADAE2", whiteSpace: "pre-wrap" },
+  quoteRef: { color: "#5B8DEF", marginRight: 6 },
+  reportBtn: { background: "transparent", border: "none", padding: 0, display: "flex", alignItems: "center" },
+  replyBtn: {
+    background: "transparent",
+    border: "none",
+    padding: 0,
+    display: "flex",
+    alignItems: "center",
+    gap: 3,
+    color: "#6B6B78",
+    fontSize: 11.5,
+  },
   replyBanner: {
     display: "flex",
     alignItems: "center",
