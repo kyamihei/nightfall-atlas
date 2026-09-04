@@ -163,41 +163,50 @@ function ClipRow({
             {String(clip.rank).padStart(2, "0")}
           </div>
 
-          <button
-            className="cv-clip-thumb"
-            onClick={(e) => {
-              e.stopPropagation();
-              setPlayerOpen((o) => !o);
-            }}
-            style={{
-              ...styles.thumb,
-              background: clip.thumbnail_url ? "transparent" : tagStyle.bg,
-              color: tagStyle.text,
-              padding: clip.thumbnail_url ? 0 : styles.thumb.padding,
-              overflow: "hidden",
-              border: "none",
-              position: "relative",
-            }}
-            aria-label={playerOpen ? "動画を閉じる" : "動画を再生"}
-            title={playerOpen ? "動画を閉じる" : "クリックでこの場で動画を再生"}
-          >
-            {clip.thumbnail_url ? (
-              <img
-                src={clip.thumbnail_url}
-                alt=""
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          {playerOpen ? (
+            <div className="cv-clip-thumb" style={{ ...styles.thumb, padding: 0, overflow: "hidden", border: "none" }}>
+              <iframe
+                src={`https://clips.twitch.tv/embed?clip=${clip.id}&parent=${window.location.hostname}&autoplay=true&muted=true`}
+                style={{ width: "100%", height: "100%", border: "none" }}
+                allowFullScreen
+                title={clip.title}
               />
-            ) : (
-              clip.game
-            )}
-            {!playerOpen && (
+            </div>
+          ) : (
+            <button
+              className="cv-clip-thumb"
+              onClick={(e) => {
+                e.stopPropagation();
+                setPlayerOpen(true);
+              }}
+              style={{
+                ...styles.thumb,
+                background: clip.thumbnail_url ? "transparent" : tagStyle.bg,
+                color: tagStyle.text,
+                padding: clip.thumbnail_url ? 0 : styles.thumb.padding,
+                overflow: "hidden",
+                border: "none",
+                position: "relative",
+              }}
+              aria-label="動画を再生"
+              title="クリックでこの場で動画を再生"
+            >
+              {clip.thumbnail_url ? (
+                <img
+                  src={clip.thumbnail_url}
+                  alt=""
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                />
+              ) : (
+                clip.game
+              )}
               <span style={styles.thumbPlayOverlay}>
                 <span style={styles.thumbPlayIcon}>
                   <Play size={12} fill="#14141B" color="#14141B" style={{ marginLeft: 1 }} />
                 </span>
               </span>
-            )}
-          </button>
+            </button>
+          )}
         </div>
 
         <div style={styles.infoCol}>
@@ -349,16 +358,6 @@ function ClipRow({
         })}
       </div>
 
-      {playerOpen && (
-        <div className="cv-fade-in" style={styles.playerPanel} onClick={(e) => e.stopPropagation()}>
-          <iframe
-            src={`https://clips.twitch.tv/embed?clip=${clip.id}&parent=${window.location.hostname}&autoplay=false`}
-            style={styles.playerFrame}
-            allowFullScreen
-            title={clip.title}
-          />
-        </div>
-      )}
     </div>
   );
 }
@@ -661,7 +660,7 @@ function WeeklyClipperBoard({ clippers, loading }) {
       </div>
       <div style={styles.weeklyBoardList}>
         {loading
-          ? Array.from({ length: 5 }).map((_, i) => (
+          ? Array.from({ length: 10 }).map((_, i) => (
               <div key={i} className="cv-skeleton" style={styles.weeklyChipSkeleton} />
             ))
           : clippers.map((c, i) => {
@@ -830,7 +829,7 @@ export default function ClipRanking() {
   const { clippers: weeklyClippers, loading: weeklyClippersLoading } = useTopClippersByPeriod(
     weekRange.start,
     weekRange.end,
-    5,
+    10,
   );
 
   const [activeCommentClipId, setActiveCommentClipId] = useState(null);
@@ -2000,17 +1999,6 @@ const styles = {
     fontWeight: 500,
   },
   stampCount: { fontSize: 11, color: "#6B6B78" },
-  playerPanel: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTop: "1px solid #24242F",
-  },
-  playerFrame: {
-    width: "100%",
-    aspectRatio: "16 / 9",
-    border: "none",
-    borderRadius: 8,
-  },
   commentBackdrop: {
     position: "fixed",
     inset: 0,
