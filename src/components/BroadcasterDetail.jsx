@@ -5,6 +5,7 @@ import { useBroadcasterProfile, useBroadcasterTags } from "../lib/use-clip-ranki
 import { useDocumentMeta } from "../lib/use-document-meta";
 import { useSmartBack } from "../lib/use-smart-back";
 import Footer from "./Footer";
+import BackgroundGlow from "./BackgroundGlow";
 import ShareButtons from "./ShareButtons";
 
 const PERIOD_TABS = [
@@ -80,6 +81,7 @@ export default function BroadcasterDetail() {
 
   return (
     <div style={styles.page}>
+      <BackgroundGlow />
       <style>{`
         * { font-family: 'Inter', sans-serif; }
         .clip-title-font { font-family: 'Oswald', sans-serif; }
@@ -233,6 +235,8 @@ export default function BroadcasterDetail() {
 
 const styles = {
   page: {
+    position: "relative",
+    zIndex: 0,
     minHeight: "100vh",
     background: "#14141B",
     color: "#EDEDF2",

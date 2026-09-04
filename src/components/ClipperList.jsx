@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ArrowLeft, Scissors, ChevronLeft, ChevronRight } from "lucide-react";
 import { useTopClippers } from "../lib/use-clip-ranking";
 import Footer from "./Footer";
+import BackgroundGlow from "./BackgroundGlow";
 
 const PAGE_SIZE = 30;
 const RANK_ACCENTS = { 1: "#FFC857", 2: "#C9CEDA", 3: "#D98E5D" };
@@ -28,6 +29,7 @@ export default function ClipperList() {
 
   return (
     <div style={styles.page}>
+      <BackgroundGlow />
       <style>{`
         * { font-family: 'Inter', sans-serif; }
         .clip-title-font { font-family: 'Oswald', sans-serif; }
@@ -149,6 +151,8 @@ export default function ClipperList() {
 
 const styles = {
   page: {
+    position: "relative",
+    zIndex: 0,
     minHeight: "100vh",
     background: "#14141B",
     color: "#EDEDF2",

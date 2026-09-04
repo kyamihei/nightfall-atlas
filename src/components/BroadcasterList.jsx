@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ArrowLeft, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { useTopBroadcasters } from "../lib/use-clip-ranking";
 import Footer from "./Footer";
+import BackgroundGlow from "./BackgroundGlow";
 
 const PAGE_SIZE = 30;
 
@@ -21,6 +22,7 @@ export default function BroadcasterList() {
 
   return (
     <div style={styles.page}>
+      <BackgroundGlow />
       <style>{`
         * { font-family: 'Inter', sans-serif; }
         .clip-title-font { font-family: 'Oswald', sans-serif; }
@@ -122,6 +124,8 @@ export default function BroadcasterList() {
 
 const styles = {
   page: {
+    position: "relative",
+    zIndex: 0,
     minHeight: "100vh",
     background: "#14141B",
     color: "#EDEDF2",

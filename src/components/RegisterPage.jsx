@@ -4,6 +4,7 @@ import { supabase, ensureAnonymousSession } from "../lib/supabase-client";
 import { useMembership } from "../lib/use-clip-ranking";
 import { useSmartBack } from "../lib/use-smart-back";
 import Footer from "./Footer";
+import BackgroundGlow from "./BackgroundGlow";
 
 const REGISTER_PATH = "/register";
 
@@ -187,6 +188,7 @@ export default function RegisterPage() {
 
   return (
     <div style={styles.page}>
+      <BackgroundGlow />
       <style>{`
         * { font-family: 'Inter', sans-serif; }
         .clip-title-font { font-family: 'Oswald', sans-serif; }
@@ -340,6 +342,8 @@ export default function RegisterPage() {
 
 const styles = {
   page: {
+    position: "relative",
+    zIndex: 0,
     minHeight: "100vh",
     background: "#14141B",
     color: "#EDEDF2",

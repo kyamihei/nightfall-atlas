@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ArrowLeft, Loader2, Film, Smile } from "lucide-react";
 import { useMyStamps, useBroadcasterAvatars, REACTION_STAMPS } from "../lib/use-clip-ranking";
 import Footer from "./Footer";
+import BackgroundGlow from "./BackgroundGlow";
 
 function formatViews(n) {
   return new Intl.NumberFormat("ja-JP").format(n);
@@ -28,6 +29,7 @@ export default function MyStampsPage() {
 
   return (
     <div style={styles.page}>
+      <BackgroundGlow />
       <style>{`
         * { font-family: 'Inter', sans-serif; }
         .clip-title-font { font-family: 'Oswald', sans-serif; }
@@ -120,6 +122,8 @@ export default function MyStampsPage() {
 
 const styles = {
   page: {
+    position: "relative",
+    zIndex: 0,
     minHeight: "100vh",
     background: "#14141B",
     color: "#EDEDF2",

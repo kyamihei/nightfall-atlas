@@ -5,6 +5,7 @@ import { useClipperProfile } from "../lib/use-clip-ranking";
 import { useDocumentMeta } from "../lib/use-document-meta";
 import { useSmartBack } from "../lib/use-smart-back";
 import Footer from "./Footer";
+import BackgroundGlow from "./BackgroundGlow";
 import ShareButtons from "./ShareButtons";
 
 const PERIOD_TABS = [
@@ -71,6 +72,7 @@ export default function ClipperDetail() {
 
   return (
     <div style={styles.page}>
+      <BackgroundGlow />
       <style>{`
         * { font-family: 'Inter', sans-serif; }
         .clip-title-font { font-family: 'Oswald', sans-serif; }
@@ -194,6 +196,8 @@ export default function ClipperDetail() {
 
 const styles = {
   page: {
+    position: "relative",
+    zIndex: 0,
     minHeight: "100vh",
     background: "#14141B",
     color: "#EDEDF2",

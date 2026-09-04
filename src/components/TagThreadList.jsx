@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, MessageSquare, Plus, Search } from "lucide-react";
 import { useTagThreads, useGetOrCreateTagThread } from "../lib/use-clip-ranking";
 import Footer from "./Footer";
+import BackgroundGlow from "./BackgroundGlow";
 
 function timeAgo(ts) {
   const diff = Math.max(0, Date.now() - ts);
@@ -41,6 +42,7 @@ export default function TagThreadList() {
 
   return (
     <div style={styles.page}>
+      <BackgroundGlow />
       <style>{`
         * { font-family: 'Inter', sans-serif; }
         .clip-title-font { font-family: 'Oswald', sans-serif; }
@@ -140,6 +142,8 @@ export default function TagThreadList() {
 
 const styles = {
   page: {
+    position: "relative",
+    zIndex: 0,
     minHeight: "100vh",
     background: "#14141B",
     color: "#EDEDF2",

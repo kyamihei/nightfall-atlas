@@ -4,6 +4,7 @@ import { ArrowLeft, Search, Loader2, Film } from "lucide-react";
 import { useClipSearch, extractClipIdFromUrl, SEARCH_MIN_LENGTH } from "../lib/use-clip-ranking";
 import { supabase } from "../lib/supabase-client";
 import Footer from "./Footer";
+import BackgroundGlow from "./BackgroundGlow";
 
 function formatViews(n) {
   return new Intl.NumberFormat("ja-JP").format(n);
@@ -48,6 +49,7 @@ export default function ClipSearch() {
 
   return (
     <div style={styles.page}>
+      <BackgroundGlow />
       <style>{`
         * { font-family: 'Inter', sans-serif; }
         .clip-title-font { font-family: 'Oswald', sans-serif; }
@@ -140,6 +142,8 @@ export default function ClipSearch() {
 
 const styles = {
   page: {
+    position: "relative",
+    zIndex: 0,
     minHeight: "100vh",
     background: "#14141B",
     color: "#EDEDF2",

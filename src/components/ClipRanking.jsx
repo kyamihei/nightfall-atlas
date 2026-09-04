@@ -25,6 +25,7 @@ import {
 import { REACTIONS_ENABLED } from "../lib/feature-flags";
 import { useActivityFeedPrefs, ACTIVITY_FEED_TYPES } from "../lib/use-activity-feed-prefs";
 import Footer from "./Footer";
+import BackgroundGlow from "./BackgroundGlow";
 
 const PERIOD_TABS = [
   { value: "all", label: "全期間" },
@@ -946,11 +947,7 @@ export default function ClipRanking() {
 
   return (
     <div style={styles.page}>
-      <div style={styles.bgGlow} aria-hidden="true">
-        <div className="cv-bg-blob-1" style={{ ...styles.bgBlob, background: "#FF4D6D", top: "-12%", left: "-8%" }} />
-        <div className="cv-bg-blob-2" style={{ ...styles.bgBlob, background: "#7E14FF", top: "8%", right: "-14%" }} />
-        <div className="cv-bg-blob-3" style={{ ...styles.bgBlob, background: "#47BFFF", bottom: "-16%", left: "28%" }} />
-      </div>
+      <BackgroundGlow />
       <style>{`
         * { font-family: 'Inter', sans-serif; }
         .clip-rank-num { font-family: 'Oswald', sans-serif; }
@@ -1433,23 +1430,6 @@ const styles = {
     padding: "28px 32px 40px",
     maxWidth: 1200,
     margin: "0 auto",
-  },
-  bgGlow: {
-    // position:absoluteだとpage全体（スクロールで数千pxになる）の高さ基準になり、
-    // %指定のブロブ位置が画面外へ飛んでいってしまうため、ビューポート基準のfixedにする
-    position: "fixed",
-    inset: 0,
-    overflow: "hidden",
-    pointerEvents: "none",
-    zIndex: -1, // pageのposition:relative+zIndex:0を基準にスタッキングし、通常コンテンツより下に描画させる
-  },
-  bgBlob: {
-    position: "absolute",
-    width: 560,
-    height: 560,
-    borderRadius: "50%",
-    filter: "blur(110px)",
-    opacity: 0.22,
   },
   newSiteBanner: {
     display: "flex",

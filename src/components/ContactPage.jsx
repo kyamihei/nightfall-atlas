@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ArrowLeft, Send } from "lucide-react";
 import { useContactForm } from "../lib/use-clip-ranking";
 import Footer from "./Footer";
+import BackgroundGlow from "./BackgroundGlow";
 
 const CATEGORIES = [
   { value: "bug", label: "不具合の報告" },
@@ -32,6 +33,7 @@ export default function ContactPage() {
 
   return (
     <div style={styles.page}>
+      <BackgroundGlow />
       <style>{`
         * { font-family: 'Inter', sans-serif; }
         .clip-title-font { font-family: 'Oswald', sans-serif; }
@@ -111,6 +113,8 @@ export default function ContactPage() {
 
 const styles = {
   page: {
+    position: "relative",
+    zIndex: 0,
     minHeight: "100vh",
     background: "#14141B",
     color: "#EDEDF2",

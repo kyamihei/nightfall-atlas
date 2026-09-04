@@ -4,6 +4,7 @@ import { ArrowLeft, Send, CornerUpLeft, X } from "lucide-react";
 import { useTagThread, useTagThreadComments } from "../lib/use-clip-ranking";
 import { useSmartBack } from "../lib/use-smart-back";
 import Footer from "./Footer";
+import BackgroundGlow from "./BackgroundGlow";
 
 function timeAgo(ts) {
   const diff = Math.max(0, Date.now() - ts);
@@ -72,6 +73,7 @@ export default function TagThreadDetail() {
   if (!threadLoading && !thread) {
     return (
       <div style={styles.page}>
+        <BackgroundGlow />
         <button onClick={goBack} style={styles.backLink}>
           <ArrowLeft size={14} />
           タグスレ一覧に戻る
@@ -84,6 +86,7 @@ export default function TagThreadDetail() {
 
   return (
     <div style={styles.page}>
+      <BackgroundGlow />
       <style>{`
         * { font-family: 'Inter', sans-serif; }
         .clip-title-font { font-family: 'Oswald', sans-serif; }
@@ -164,6 +167,8 @@ export default function TagThreadDetail() {
 
 const styles = {
   page: {
+    position: "relative",
+    zIndex: 0,
     minHeight: "100vh",
     background: "#14141B",
     color: "#EDEDF2",

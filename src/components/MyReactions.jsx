@@ -4,6 +4,7 @@ import { ArrowLeft, Loader2, Star } from "lucide-react";
 import { useMyReactions, useBroadcasterAvatars } from "../lib/use-clip-ranking";
 import { REACTIONS_ENABLED } from "../lib/feature-flags";
 import Footer from "./Footer";
+import BackgroundGlow from "./BackgroundGlow";
 
 function formatViews(n) {
   return new Intl.NumberFormat("ja-JP").format(n);
@@ -33,6 +34,7 @@ export default function MyReactions() {
   if (!REACTIONS_ENABLED) {
     return (
       <div style={styles.page}>
+        <BackgroundGlow />
         <Link to="/" style={styles.backLink}>
           <ArrowLeft size={14} />
           ランキングに戻る
@@ -45,6 +47,7 @@ export default function MyReactions() {
 
   return (
     <div style={styles.page}>
+      <BackgroundGlow />
       <style>{`
         * { font-family: 'Inter', sans-serif; }
         .clip-title-font { font-family: 'Oswald', sans-serif; }
@@ -141,6 +144,8 @@ export default function MyReactions() {
 
 const styles = {
   page: {
+    position: "relative",
+    zIndex: 0,
     minHeight: "100vh",
     background: "#14141B",
     color: "#EDEDF2",

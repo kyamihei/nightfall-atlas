@@ -18,6 +18,7 @@ import { REACTIONS_ENABLED } from "../lib/feature-flags";
 import { useDocumentMeta } from "../lib/use-document-meta";
 import { useSmartBack } from "../lib/use-smart-back";
 import Footer from "./Footer";
+import BackgroundGlow from "./BackgroundGlow";
 import ShareButtons from "./ShareButtons";
 
 function formatViews(n) {
@@ -120,6 +121,7 @@ export default function ClipDetail() {
   if (error || !clip) {
     return (
       <div style={styles.page}>
+        <BackgroundGlow />
         <button onClick={goBack} style={styles.backLink}>
           <ArrowLeft size={14} />
           ランキングに戻る
@@ -134,6 +136,7 @@ export default function ClipDetail() {
 
   return (
     <div style={styles.page}>
+      <BackgroundGlow />
       <style>{`
         * { font-family: 'Inter', sans-serif; }
         .clip-title-font { font-family: 'Oswald', sans-serif; }
@@ -383,6 +386,8 @@ export default function ClipDetail() {
 
 const styles = {
   page: {
+    position: "relative",
+    zIndex: 0,
     minHeight: "100vh",
     background: "#14141B",
     color: "#EDEDF2",
