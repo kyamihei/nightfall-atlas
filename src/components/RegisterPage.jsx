@@ -76,12 +76,15 @@ export default function RegisterPage() {
     }
 
     async function checkConfirmed() {
+      console.log("[cv-debug] checkConfirmed start");
       await handleUrlParams();
       if (cancelled) return;
       await ensureAnonymousSession();
       const { data } = await supabase.auth.getUser();
+      console.log("[cv-debug] getUser result", { email: data.user?.email, is_anonymous: data.user?.is_anonymous, cancelled });
       if (cancelled || !data.user) return;
       if (data.user.email && data.user.is_anonymous === false) {
+        console.log("[cv-debug] condition matched, setting emailConfirmed=true");
         // getUser()はサーバーへ問い合わせるため正確だが、ローカルに保持しているアクセストークン
         // （JWT）自体はメール確認前に発行された古いもの（is_anonymous=trueが埋め込まれたまま）の
         // ことがある。register_member() RPC呼び出し前にセッションを明示的に更新しておく
@@ -187,6 +190,8 @@ export default function RegisterPage() {
     setLoginSubmitting(false);
     await refreshMembership();
   }
+
+  console.log("[cv-debug] render", { membershipLoading, memberNumber, emailConfirmed, emailSent, mode });
 
   return (
     <div style={styles.page}>
