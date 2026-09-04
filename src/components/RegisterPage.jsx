@@ -41,7 +41,43 @@ export default function RegisterPage() {
   // このページ（/register）へ戻ってくるように送るため、リンクを踏んだ直後の再訪問もここで拾える。
   useEffect(() => {
     let cancelled = false;
+
+    // メール確認リンクを踏んで戻ってきた直後のURLを処理する。PKCEフロー（?code=...）の場合、
+    // supabase-jsのdetectSessionInUrl（既定true）が自動で交換してくれるはずだが、
+    // そのタイミングとこのuseEffectの実行タイミングが競合する可能性を排除するため、
+    // 明示的にexchangeCodeForSessionを呼んでおく（二重に呼んでも実害はない）。
+    // また、リンクが期限切れ/既に使用済み等で失敗した場合はSupabaseが
+    // ?error=...&error_description=...を付けて返してくるため、ここで検知してユーザーに
+    // 表示する（検知しないと「何も起きず入力画面に戻る」という分かりにくい状態になる。
+    // 実際にユーザーが「メールアドレス入力画面に戻ってしまう」と報告した不具合の原因が
+    // これだった可能性が高い。例えば同じメールで確認を2回リクエストした場合、古い方の
+    // リンクは無効化され、それを踏むとこのエラーになる）。
+    async function handleUrlParams() {
+      const url = new URL(window.location.href);
+      const errorDescription = url.searchParams.get("error_description");
+      const code = url.searchParams.get("code");
+      let handled = false;
+
+      if (errorDescription) {
+        setError(`メール内リンクの確認に失敗しました: ${decodeURIComponent(errorDescription)}`);
+        handled = true;
+      } else if (code) {
+        const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+        if (exchangeError) {
+          setError(`メール内リンクの確認に失敗しました: ${exchangeError.message}`);
+        }
+        handled = true;
+      }
+
+      if (handled) {
+        url.search = "";
+        window.history.replaceState({}, "", url.toString());
+      }
+    }
+
     async function checkConfirmed() {
+      await handleUrlParams();
+      if (cancelled) return;
       await ensureAnonymousSession();
       const { data } = await supabase.auth.getUser();
       if (cancelled || !data.user) return;
