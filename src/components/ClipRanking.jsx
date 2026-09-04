@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, Users, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, Smile, Calendar, Play, Flame, Hash, ExternalLink, Settings } from "lucide-react";
+import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, Users, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, Smile, Calendar, Play, Flame, Hash, ExternalLink, Settings, Sparkles } from "lucide-react";
 import {
   useClips,
   useReactions,
@@ -511,6 +511,48 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
   );
 }
 
+const NEW_SITE_BANNER_DISMISSED_KEY = "cv-new-site-banner-dismissed";
+
+/**
+ * 「最近できたばかりのサイトだと視聴者に伝え、今のうちに使えば古参になれるかもという
+ * 承認欲求に訴えたい」という要望で追加（2026-09-04）。トップページに来て最初に目に入る
+ * ヘッダー直上に表示する。一度閉じたら二度と出さないよう閉じた状態をlocalStorageに保存する
+ * （お気に入り/配信者タグ等と違いアカウントに紐付ける必要が薄い、端末ごとの表示上の好みのため
+ * `useActivityFeedPrefs`と同じ考え方でlocalStorageのみで完結させている）。
+ */
+function NewSiteBanner() {
+  const [dismissed, setDismissed] = useState(() => {
+    try {
+      return localStorage.getItem(NEW_SITE_BANNER_DISMISSED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  function handleDismiss() {
+    setDismissed(true);
+    try {
+      localStorage.setItem(NEW_SITE_BANNER_DISMISSED_KEY, "1");
+    } catch {
+      // プライベートブラウジング等でlocalStorageが使えない場合は保存を諦める（今回の表示は閉じたままにする）
+    }
+  }
+
+  if (dismissed) return null;
+
+  return (
+    <div style={styles.newSiteBanner}>
+      <Sparkles size={16} style={styles.newSiteBannerIcon} />
+      <span style={styles.newSiteBannerText}>
+        クリスレは2026年9月にスタートしたばかりの新しいサイトです。今のうちに使い始めれば、あなたも「古参」になれるかも？
+      </span>
+      <button onClick={handleDismiss} style={styles.newSiteBannerClose} aria-label="閉じる">
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
+
 /**
  * トップページ上部に表示するライブ活動フィード。新着コメント/スタンプを1件ずつ順番に見せる
  * ティッカー（「何かが常に動いている」状態を作りたいという要望で追加、2026-09-03）。
@@ -922,6 +964,8 @@ export default function ClipRanking() {
           .cv-row-actions { flex-basis: 100%; justify-content: flex-end; }
         }
       `}</style>
+
+      <NewSiteBanner />
 
       <header className="cv-header" style={styles.header}>
         <div>
@@ -1369,6 +1413,27 @@ const styles = {
     borderRadius: "50%",
     filter: "blur(110px)",
     opacity: 0.22,
+  },
+  newSiteBanner: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    background: "linear-gradient(90deg, #FF4D6D26, #7E14FF26)",
+    border: "1px solid #FF4D6D4D",
+    borderRadius: 10,
+    padding: "10px 14px",
+    marginBottom: 16,
+  },
+  newSiteBannerIcon: { flexShrink: 0, color: "#FF4D6D" },
+  newSiteBannerText: { flex: 1, fontSize: 13, color: "#EDEDF2", lineHeight: 1.5 },
+  newSiteBannerClose: {
+    flexShrink: 0,
+    display: "flex",
+    alignItems: "center",
+    background: "none",
+    border: "none",
+    color: "#9797A6",
+    padding: 4,
   },
   header: {
     display: "flex",
