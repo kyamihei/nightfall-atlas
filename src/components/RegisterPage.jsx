@@ -46,6 +46,17 @@ export default function RegisterPage() {
       const { data } = await supabase.auth.getUser();
       if (cancelled || !data.user) return;
       if (data.user.email && data.user.is_anonymous === false) {
+        // getUser()はサーバーへ問い合わせるため正確だが、ローカルに保持しているアクセストークン
+        // （JWT）自体はメール確認前に発行された古いもの（is_anonymous=trueが埋め込まれたまま）の
+        // ことがある。register_member() RPC呼び出し前にセッションを明示的に更新しておく
+        // （このRPC自体はauth.usersの実データを見るよう修正済みで古いトークンでも動くが、
+        // 念のための保険。詳細はCLAUDE.md参照）。
+        try {
+          await supabase.auth.refreshSession();
+        } catch {
+          // 更新に失敗しても致命的ではない（後続のRPC呼び出し自体が正しく判定する）
+        }
+        if (cancelled) return;
         setEmailConfirmed(true);
         setEmail(data.user.email);
       }
