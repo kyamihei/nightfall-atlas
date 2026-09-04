@@ -152,52 +152,53 @@ function ClipRow({
       title="クリックでコメントを開く（サムネイル＝動画再生、タイトル＝詳細ページ）"
     >
       <div className="cv-row-main" style={styles.rowMain}>
-        <div
-          className="clip-rank-num"
-          style={{
-            ...styles.rankNum,
-            color: rankAccent || "#565660",
-            textShadow: rankAccent ? `0 0 14px ${rankAccent}66` : "none",
-          }}
-        >
-          {String(clip.rank).padStart(2, "0")}
-        </div>
+        <div className="cv-thumb-wrap">
+          <div
+            className="clip-rank-num"
+            style={{
+              color: rankAccent || "#565660",
+              textShadow: rankAccent ? `0 0 14px ${rankAccent}66` : "none",
+            }}
+          >
+            {String(clip.rank).padStart(2, "0")}
+          </div>
 
-        <button
-          className="cv-clip-thumb"
-          onClick={(e) => {
-            e.stopPropagation();
-            setPlayerOpen((o) => !o);
-          }}
-          style={{
-            ...styles.thumb,
-            background: clip.thumbnail_url ? "transparent" : tagStyle.bg,
-            color: tagStyle.text,
-            padding: clip.thumbnail_url ? 0 : styles.thumb.padding,
-            overflow: "hidden",
-            border: "none",
-            position: "relative",
-          }}
-          aria-label={playerOpen ? "動画を閉じる" : "動画を再生"}
-          title={playerOpen ? "動画を閉じる" : "クリックでこの場で動画を再生"}
-        >
-          {clip.thumbnail_url ? (
-            <img
-              src={clip.thumbnail_url}
-              alt=""
-              style={{ width: "100%", height: "100%", objectFit: "cover" }}
-            />
-          ) : (
-            clip.game
-          )}
-          {!playerOpen && (
-            <span style={styles.thumbPlayOverlay}>
-              <span style={styles.thumbPlayIcon}>
-                <Play size={12} fill="#14141B" color="#14141B" style={{ marginLeft: 1 }} />
+          <button
+            className="cv-clip-thumb"
+            onClick={(e) => {
+              e.stopPropagation();
+              setPlayerOpen((o) => !o);
+            }}
+            style={{
+              ...styles.thumb,
+              background: clip.thumbnail_url ? "transparent" : tagStyle.bg,
+              color: tagStyle.text,
+              padding: clip.thumbnail_url ? 0 : styles.thumb.padding,
+              overflow: "hidden",
+              border: "none",
+              position: "relative",
+            }}
+            aria-label={playerOpen ? "動画を閉じる" : "動画を再生"}
+            title={playerOpen ? "動画を閉じる" : "クリックでこの場で動画を再生"}
+          >
+            {clip.thumbnail_url ? (
+              <img
+                src={clip.thumbnail_url}
+                alt=""
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+              />
+            ) : (
+              clip.game
+            )}
+            {!playerOpen && (
+              <span style={styles.thumbPlayOverlay}>
+                <span style={styles.thumbPlayIcon}>
+                  <Play size={12} fill="#14141B" color="#14141B" style={{ marginLeft: 1 }} />
+                </span>
               </span>
-            </span>
-          )}
-        </button>
+            )}
+          </button>
+        </div>
 
         <div style={styles.infoCol}>
           <Link
@@ -697,9 +698,11 @@ function WeeklyClipperBoard({ clippers, loading }) {
 function SkeletonRow({ delay }) {
   return (
     <div style={{ ...styles.row, animationDelay: `${delay}ms` }} className="cv-fade-in-up">
-      <div style={styles.rowMain}>
-        <div className="cv-skeleton" style={styles.skeletonRank} />
-        <div className="cv-skeleton cv-clip-thumb" style={styles.skeletonThumb} />
+      <div className="cv-row-main" style={styles.rowMain}>
+        <div className="cv-thumb-wrap">
+          <div className="cv-skeleton clip-rank-num" style={styles.skeletonRank} />
+          <div className="cv-skeleton cv-clip-thumb" style={styles.skeletonThumb} />
+        </div>
         <div style={{ ...styles.infoCol, display: "flex", flexDirection: "column", gap: 8 }}>
           <div className="cv-skeleton" style={styles.skeletonTitle} />
           <div className="cv-skeleton" style={styles.skeletonMeta} />
@@ -982,9 +985,41 @@ export default function ClipRanking() {
         .cv-clip-thumb { width: 64px; height: 44px; }
         .cv-clip-title { font-size: 15px; }
         .cv-clip-title-link:hover .cv-clip-title { text-decoration: underline; }
+
+        /* クリップ一覧: スマホ〜タブレットは縦積みリスト、PC幅（901px〜）はカード型グリッドに
+           切り替える（2026-09-04、「PC用画面とスマホ用画面を明確に分けたい」という要望への対応）。
+           display/flex-direction等をここでまとめて制御する（インライン styles.list/rowMain/rankNum
+           側には幅・レイアウト系プロパティを一切置かない設計。インラインスタイルは常に
+           このCSSより優先されてしまい@mediaで上書きできないため） */
+        .cv-clip-list { display: flex; flex-direction: column; gap: 10px; }
+        .cv-row-main { display: flex; align-items: center; gap: 14px; }
+        .clip-rank-num { font-size: 26px; font-weight: 600; width: 34px; flex-shrink: 0; }
+        /* サムネイルと順位バッジをまとめたラッパー。スマホ時はdisplay:contentsで
+           レイアウトに影響を与えず（順位バッジ・サムネイルは従来通りcv-row-mainの
+           直接の子として横並びになる）、PC幅ではposition:relativeにしてバッジを
+           サムネイル左上にオーバーレイ表示する */
+        .cv-thumb-wrap { display: contents; }
+
         @media (min-width: 901px) {
-          .cv-clip-thumb { width: 132px; height: 74px; }
-          .cv-clip-title { font-size: 19px; }
+          .cv-clip-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+          .cv-row-main { flex-direction: column; align-items: stretch; gap: 10px; }
+          .cv-thumb-wrap { display: block; position: relative; }
+          .cv-clip-thumb { width: 100%; height: auto; aspect-ratio: 16 / 9; }
+          .cv-clip-title { font-size: 17px; }
+          .clip-rank-num {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            z-index: 1;
+            width: auto;
+            font-size: 14px;
+            padding: 2px 9px;
+            border-radius: 6px;
+            background: rgba(20, 20, 27, 0.82);
+          }
+        }
+        @media (min-width: 1400px) {
+          .cv-clip-list { grid-template-columns: repeat(4, 1fr); }
         }
         @media (max-width: 640px) {
           .cv-header { flex-direction: column; align-items: flex-start; }
@@ -1261,7 +1296,7 @@ export default function ClipRanking() {
 
             {clipsError && <div style={styles.errorBanner}>{clipsError}</div>}
 
-            <div style={styles.list}>
+            <div className="cv-clip-list" style={styles.list}>
               {loading && (
                 <>
                   {Array.from({ length: 6 }).map((_, i) => (
@@ -1376,7 +1411,7 @@ export default function ClipRanking() {
             )}
           </>
         ) : (
-          <div style={styles.list}>
+          <div className="cv-clip-list" style={styles.list}>
             {trendingLoading && (
               <>
                 {Array.from({ length: 5 }).map((_, i) => (
@@ -1460,7 +1495,7 @@ const styles = {
     background: "#14141B",
     color: "#EDEDF2",
     padding: "28px 32px 40px",
-    maxWidth: 1200,
+    maxWidth: 1600,
     margin: "0 auto",
   },
   newSiteBanner: {
@@ -1803,7 +1838,7 @@ const styles = {
     borderRadius: 8,
     marginBottom: 16,
   },
-  list: { display: "flex", flexDirection: "column", gap: 10 },
+  list: {}, // レイアウト（縦積み/グリッド切り替え）は.cv-clip-listクラス側で制御（PC/SP分岐のため）
   emptyState: {
     color: "#6B6B78",
     fontSize: 14,
@@ -1853,13 +1888,16 @@ const styles = {
     padding: "14px 16px",
     transition: "background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease",
   },
-  rowMain: { display: "flex", alignItems: "center", gap: 14 },
-  skeletonRank: { width: 34, height: 26, borderRadius: 4, flexShrink: 0 },
+  // display/alignItems/gap/flexDirectionは.cv-row-mainクラス側で制御（PC幅ではカード表示に
+  // 縦積み切り替えするため。インライン指定するとCSSの@media側が上書きできなくなる）
+  rowMain: {},
+  skeletonRank: { height: 26, borderRadius: 4 },
   skeletonThumb: { borderRadius: 6, flexShrink: 0 },
   skeletonTitle: { width: "70%", height: 14, borderRadius: 4 },
   skeletonMeta: { width: "40%", height: 11, borderRadius: 4 },
   skeletonPill: { width: 52, height: 26, borderRadius: 8 },
-  rankNum: { fontSize: 26, fontWeight: 600, width: 34, flexShrink: 0 },
+  // fontSize/width/flexShrinkは.clip-rank-numクラス側で制御（同上）
+  rankNum: {},
   thumb: {
     borderRadius: 6,
     display: "flex",

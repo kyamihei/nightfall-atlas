@@ -29,6 +29,9 @@ export default function BroadcasterList() {
         button, a { cursor: pointer; }
         input:focus { outline: 2px solid #FF4D6D33; }
         .cv-list-row {
+          display: flex;
+          align-items: center;
+          gap: 14px;
           transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
         }
         .cv-list-row:hover {
@@ -36,6 +39,19 @@ export default function BroadcasterList() {
           border-color: #33333F;
           transform: translateY(-1px);
           box-shadow: 0 4px 16px rgba(0,0,0,0.28);
+        }
+        .cv-person-avatar { width: 36px; height: 36px; }
+        .cv-person-list { display: flex; flex-direction: column; gap: 8px; }
+
+        /* 配信者一覧: PC幅（901px〜）はカード型グリッドに切り替える
+           （2026-09-04、「PC用画面とスマホ用画面を明確に分けたい」という要望への対応） */
+        @media (min-width: 901px) {
+          .cv-person-list { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+          .cv-list-row { flex-direction: column; text-align: center; padding: 24px 16px; }
+          .cv-person-avatar { width: 84px; height: 84px; }
+        }
+        @media (min-width: 1400px) {
+          .cv-person-list { grid-template-columns: repeat(5, 1fr); }
         }
       `}</style>
 
@@ -65,7 +81,7 @@ export default function BroadcasterList() {
         <p style={styles.loadingText}>読み込み中…</p>
       ) : (
         <>
-          <div style={styles.list}>
+          <div className="cv-person-list" style={styles.list}>
             {broadcasters.length === 0 && <div style={styles.emptyState}>該当する配信者が見つかりませんでした。</div>}
             {broadcasters.map((b, i) => (
               <Link
@@ -76,9 +92,9 @@ export default function BroadcasterList() {
               >
                 <div style={styles.rankNum}>{String((page - 1) * PAGE_SIZE + i + 1).padStart(2, "0")}</div>
                 {b.profile_image_url ? (
-                  <img src={b.profile_image_url} alt="" style={styles.avatar} />
+                  <img src={b.profile_image_url} alt="" className="cv-person-avatar" style={styles.avatar} />
                 ) : (
-                  <div style={styles.avatarFallback} />
+                  <div className="cv-person-avatar" style={styles.avatarFallback} />
                 )}
                 <div style={styles.infoCol}>
                   <div style={styles.nameRow}>
@@ -130,7 +146,7 @@ const styles = {
     background: "#14141B",
     color: "#EDEDF2",
     padding: "28px 32px 40px",
-    maxWidth: 1200,
+    maxWidth: 1600,
     margin: "0 auto",
   },
   header: {
@@ -173,22 +189,20 @@ const styles = {
     width: "100%",
   },
   loadingText: { color: "#8A8A99", fontSize: 14, textAlign: "center", padding: "40px 0" },
-  list: { display: "flex", flexDirection: "column", gap: 8 },
+  // レイアウト（縦積み/グリッド切り替え）は.cv-person-listクラス側で制御（PC/SP分岐のため）
+  list: {},
   emptyState: { color: "#6B6B78", fontSize: 14, padding: "40px 0", textAlign: "center" },
+  // display/alignItems/gap/paddingは.cv-list-rowクラス側で制御（同上）
   row: {
-    display: "flex",
-    alignItems: "center",
-    gap: 14,
     background: "#1C1C26",
     border: "1px solid #24242F",
     borderRadius: 10,
-    padding: "12px 16px",
     color: "#EDEDF2",
     textDecoration: "none",
   },
   rankNum: { fontSize: 15, fontWeight: 600, color: "#565660", width: 28, flexShrink: 0 },
-  avatar: { width: 36, height: 36, borderRadius: "50%", objectFit: "cover", flexShrink: 0 },
-  avatarFallback: { width: 36, height: 36, borderRadius: "50%", background: "#20202B", flexShrink: 0 },
+  avatar: { borderRadius: "50%", objectFit: "cover", flexShrink: 0 },
+  avatarFallback: { borderRadius: "50%", background: "#20202B", flexShrink: 0 },
   infoCol: { flex: 1, minWidth: 0 },
   nameRow: { display: "flex", alignItems: "center", gap: 8 },
   name: { fontSize: 14.5, fontWeight: 500, margin: 0, color: "#EDEDF2" },
