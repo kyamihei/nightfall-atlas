@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, useSearchParams } from "react-router-dom";
 import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, SlidersHorizontal, Play, Flame, Settings, Sparkles, Smile } from "lucide-react";
 import {
@@ -126,6 +127,48 @@ function ClipRow({
   const [dislikeBump, setDislikeBump] = useState(0);
   const [favBump, setFavBump] = useState(0);
   const [reactionsOpen, setReactionsOpen] = useState(false);
+  // ポップアップの表示座標（position: fixed用、ボタンのgetBoundingClientRectから算出）。
+  // カード（row）は常時transformを付けているため独自のスタッキングコンテキストを作ってしまい、
+  // カード内に普通にposition: absoluteで置くと下の行のカードに隠れてしまう（実機確認済みの不具合）。
+  // そのためdocument.bodyへcreatePortalし、画面座標で直接配置することでこれを回避する。
+  const [reactionPopupPos, setReactionPopupPos] = useState(null);
+  const reactionTriggerRef = useRef(null);
+  const reactionPanelRef = useRef(null);
+
+  useEffect(() => {
+    if (!reactionsOpen) return;
+    function handleClickOutside(e) {
+      if (reactionTriggerRef.current?.contains(e.target) || reactionPanelRef.current?.contains(e.target)) {
+        return;
+      }
+      setReactionsOpen(false);
+    }
+    // スクロール/リサイズで座標がずれるため、固定の再計算はせずシンプルに閉じる
+    function handleScrollOrResize() {
+      setReactionsOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    window.addEventListener("resize", handleScrollOrResize);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      window.removeEventListener("resize", handleScrollOrResize);
+    };
+  }, [reactionsOpen]);
+
+  function toggleReactionPopup(e) {
+    e.stopPropagation();
+    if (reactionsOpen) {
+      setReactionsOpen(false);
+      return;
+    }
+    const rect = reactionTriggerRef.current.getBoundingClientRect();
+    const width = 232;
+    const left = Math.min(Math.max(8, rect.right - width), window.innerWidth - width - 8);
+    setReactionPopupPos({ top: rect.bottom + 8, left });
+    setReactionsOpen(true);
+  }
 
   useEffect(() => {
     onCommentsUpdate(clip.id, { comments, submit, submitting, error });
@@ -335,10 +378,8 @@ function ClipRow({
             {favoriteCount > 0 ? favoriteCount : ""}
           </button>
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setReactionsOpen((o) => !o);
-            }}
+            ref={reactionTriggerRef}
+            onClick={toggleReactionPopup}
             style={{
               ...styles.actionBtn,
               color: reactionsOpen || totalStampCount > 0 ? "#EDEDF2" : "#8A8A99",
@@ -358,29 +399,37 @@ function ClipRow({
         </div>
       </div>
 
-      {reactionsOpen && (
-        <div className="cv-fade-in" style={styles.stampPickerRow} onClick={(e) => e.stopPropagation()}>
-          {REACTION_STAMPS.map((stamp) => {
-            const count = stampCounts?.[stamp] ?? 0;
-            const selected = myStamps?.has(stamp) ?? false;
-            return (
-              <button
-                key={stamp}
-                onClick={() => onToggleStamp(clip.id, stamp)}
-                style={{
-                  ...styles.stampBtn,
-                  color: selected ? "#FFC857" : "#8A8A99",
-                  borderColor: selected ? "#FFC85755" : "#2E2E3A",
-                  background: selected ? "#3A2E1466" : "transparent",
-                }}
-              >
-                {stamp}
-                {count > 0 && <span style={styles.stampCount}>{count}</span>}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {reactionsOpen &&
+        reactionPopupPos &&
+        createPortal(
+          <div
+            ref={reactionPanelRef}
+            className="cv-fade-in"
+            style={{ ...styles.reactionPopup, top: reactionPopupPos.top, left: reactionPopupPos.left }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {REACTION_STAMPS.map((stamp) => {
+              const count = stampCounts?.[stamp] ?? 0;
+              const selected = myStamps?.has(stamp) ?? false;
+              return (
+                <button
+                  key={stamp}
+                  onClick={() => onToggleStamp(clip.id, stamp)}
+                  style={{
+                    ...styles.stampBtn,
+                    color: selected ? "#FFC857" : "#8A8A99",
+                    borderColor: selected ? "#FFC85755" : "#2E2E3A",
+                    background: selected ? "#3A2E1466" : "transparent",
+                  }}
+                >
+                  {stamp}
+                  {count > 0 && <span style={styles.stampCount}>{count}</span>}
+                </button>
+              );
+            })}
+          </div>,
+          document.body
+        )}
 
     </div>
   );
@@ -1823,13 +1872,18 @@ const styles = {
     fontSize: 12.5,
   },
   favBtn: { padding: "6px 8px" },
-  stampPickerRow: {
+  reactionPopup: {
+    position: "fixed",
+    zIndex: 1000,
     display: "flex",
     flexWrap: "wrap",
     gap: 6,
-    marginTop: 12,
-    paddingTop: 12,
-    borderTop: "1px solid #24242F",
+    width: 232,
+    background: "#1C1C26",
+    border: "1px solid #2E2E3A",
+    borderRadius: 10,
+    padding: 10,
+    boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
   },
   stampBtn: {
     display: "flex",

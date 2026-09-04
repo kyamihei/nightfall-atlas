@@ -1721,6 +1721,46 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   （`ClipDetail.jsx`）は1クリップしか表示しないページのため、同じ7種類のスタンプ行は
   従来通り常時表示のまま変更していない（必要になれば同じパターンで追従できる）。
 
+## リアクションポップアップ化・実機で踏んだスタッキングコンテキストの罠（2026-09-04追加）
+
+- **要望**: 上記の折りたたみ表示を、インライン展開（下に押し出す）ではなくボタン直下に
+  浮かぶポップアップにしてほしいという追加指示。
+- **最初の実装とその失敗**: `ClipRow`（カード）のルート`<div>`はホバー時のアニメーション
+  （`transform: translateY(...)`）を常時インラインstyleで持っている（`translateY(0)`も含めて
+  常にtransform値を設定している）。CSSの仕様上、`transform`が`none`以外だとその要素は
+  独自のスタッキングコンテキストを作る。そのため、ポップアップをカード内で単純に
+  `position: absolute`にすると、カード自身のスタッキングコンテキストに閉じ込められ、
+  DOM順で後にある次の行のカード（同じく自前のスタッキングコンテキストを持つ）に
+  `z-index`の大小に関わらず隠れてしまうという不具合を実機（claude-in-chrome）で確認した。
+  `z-index`は同一スタッキングコンテキスト内でしか比較されないため、値を上げても解決しない。
+- **実装（修正後）**: `createPortal`（`react-dom`）で`document.body`直下にポップアップを
+  レンダリングし、トリガーボタンの`getBoundingClientRect()`から算出した座標を
+  `position: fixed`で指定することでカードのスタッキングコンテキストを完全に迂回した。
+  横位置はボタン右端に揃えつつ`window.innerWidth`でクランプし、画面外にはみ出さないようにした。
+  スクロール/リサイズで座標がずれる問題は、再計算コストをかけず単純にポップアップを
+  閉じることで回避（`window`の`scroll`（capture）/`resize`イベントで`setReactionsOpen(false)`）。
+  クリック位置がトリガーボタン・パネルのどちらの外側かを見て閉じるoutside-click判定は、
+  ポップアップがportal経由でDOM上の別の場所に存在するため、`reactionTriggerRef`と
+  `reactionPanelRef`の2つのrefで両方を判定する構成にした（片方だけでは他方の内側クリックが
+  outside判定されてしまう）。
+- **教訓**: このプロジェクトでは他にも複数箇所でカード/行にホバー用の常時`transform`
+  インラインstyleを使っている（`BroadcasterList.jsx`・`ClipperList.jsx`の`cv-list-row`等）。
+  今後カード内にposition: absoluteのポップオーバーを追加する場合は、同じスタッキング
+  コンテキストの罠を踏む可能性が高いため、最初から`createPortal`を検討すること。
+
+## 会員番号の採番を100番から開始（2026-09-04追加）
+
+- **要望**: 「私以外で新規登録する会員がいれば、番号を100から付与してほしい」という指示。
+  会員番号#1はユーザー本人用に予約されている前提（`register_member()`は`members.member_number`
+  を`generated always as identity`で自動採番しており、これまでの唯一の登録者である
+  ユーザー本人が#1を持っている）。
+- **実装**: 新規マイグレーション`20260904120000_member_number_start_100.sql`で
+  `alter sequence members_member_number_seq restart with 100;`を実行。適用時点で#1のユーザー
+  以外に会員がいなかったため、既存データへの影響なく次回発行分から100番になる
+  （適用後に`last_value=100, is_called=false`であることを確認済み。次の`register_member()`
+  呼び出しで実際に100が発行される）。`supabase/schema.sql`にも同じALTER SEQUENCEを
+  `members`テーブル定義直後に追記し、新規環境構築時にも同じ採番ルールが再現されるようにした。
+
 # ステアリング
 
 - git commitを行う際は、同じタイミングでリモート（origin）へのpushも必ず行うこと。ユーザーから別途pushを依頼されるのを待たない。

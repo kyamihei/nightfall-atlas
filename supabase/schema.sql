@@ -1641,6 +1641,10 @@ create table if not exists members (
   clipper_badge_enabled boolean not null default false
 );
 
+-- 会員番号#1はユーザー本人用に予約し、それ以外の新規登録者には100番から連番を発行する
+-- （2026-09-04追加）。新規環境では#1の登録後にこのALTER SEQUENCEを実行すること。
+alter sequence if exists members_member_number_seq restart with 100;
+
 create unique index if not exists idx_members_member_number on members(member_number);
 create unique index if not exists idx_members_twitch_user_id
   on members(twitch_user_id) where twitch_user_id is not null;
