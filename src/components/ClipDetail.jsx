@@ -193,6 +193,13 @@ export default function ClipDetail() {
         .clip-title-font { font-family: 'Oswald', sans-serif; }
         button, a { cursor: pointer; }
         textarea:focus, input:focus { outline: 2px solid #FF4D6D33; }
+        /* PC幅（901px〜）では動画/情報とコメントを2カラムにして左右の余白を活用する。
+           スマホ幅は従来通り縦積み1カラムのまま（ClipRanking.jsx等のPC/SPグリッド化と同じ、
+           画面幅で変えたい値はインラインstyleではなくクラス+メディアクエリ側に置く方針を踏襲）。 */
+        @media (min-width: 901px) {
+          .cv-clipdetail-layout { display: grid; grid-template-columns: 1fr 400px; gap: 32px; align-items: start; }
+          .cv-clipdetail-comments { position: sticky; top: 20px; }
+        }
       `}</style>
 
       <button onClick={goBack} style={styles.backLink}>
@@ -200,6 +207,8 @@ export default function ClipDetail() {
         ランキングに戻る
       </button>
 
+      <div className="cv-clipdetail-layout">
+      <div className="cv-clipdetail-main">
       <div style={styles.playerWrap}>
         <iframe
           src={`https://clips.twitch.tv/embed?clip=${clip.id}&parent=${window.location.hostname}&autoplay=false`}
@@ -345,8 +354,9 @@ export default function ClipDetail() {
           </button>
         </form>
       </div>
+      </div>
 
-      <section style={styles.commentSection}>
+      <section className="cv-clipdetail-comments" style={styles.commentSection}>
         <h2 style={styles.commentHeading}>コメント（{comments.length}）</h2>
         <div style={styles.commentList}>
           {comments.length === 0 && (
@@ -396,6 +406,7 @@ export default function ClipDetail() {
           )}
         </div>
       </section>
+      </div>
 
       <Footer />
     </div>
@@ -410,7 +421,7 @@ const styles = {
     background: "#14141B",
     color: "#EDEDF2",
     padding: "28px 32px 60px",
-    maxWidth: 1000,
+    maxWidth: 1360,
     margin: "0 auto",
   },
   loadingWrap: {
