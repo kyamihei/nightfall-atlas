@@ -41,6 +41,8 @@ export default function RegisterPage() {
   // このページ（/register）へ戻ってくるように送るため、リンクを踏んだ直後の再訪問もここで拾える。
   useEffect(() => {
     let cancelled = false;
+    const instanceId = Math.random().toString(36).slice(2, 8);
+    console.log("[cv-debug] effect mounted, instanceId=" + instanceId);
 
     // メール確認リンクを踏んで戻ってきた直後のURLを処理する。PKCEフロー（?code=...）の場合、
     // supabase-jsのdetectSessionInUrl（既定true）が自動で交換してくれるはずだが、
@@ -75,34 +77,40 @@ export default function RegisterPage() {
       }
     }
 
-    async function checkConfirmed() {
-      console.log("[cv-debug] checkConfirmed start");
+    async function checkConfirmed(source) {
+      console.log("[cv-debug][" + instanceId + "] checkConfirmed start, source=" + source + ", cancelled=" + cancelled);
       await handleUrlParams();
-      if (cancelled) return;
+      if (cancelled) {
+        console.log("[cv-debug][" + instanceId + "] bail after handleUrlParams, cancelled=true");
+        return;
+      }
       await ensureAnonymousSession();
       const { data } = await supabase.auth.getUser();
-      console.log("[cv-debug] getUser result", { email: data.user?.email, is_anonymous: data.user?.is_anonymous, cancelled });
+      console.log("[cv-debug][" + instanceId + "] getUser email=" + data.user?.email + " is_anonymous=" + data.user?.is_anonymous + " cancelled=" + cancelled);
       if (cancelled || !data.user) return;
       if (data.user.email && data.user.is_anonymous === false) {
-        console.log("[cv-debug] condition matched, setting emailConfirmed=true");
-        // getUser()はサーバーへ問い合わせるため正確だが、ローカルに保持しているアクセストークン
-        // （JWT）自体はメール確認前に発行された古いもの（is_anonymous=trueが埋め込まれたまま）の
-        // ことがある。register_member() RPC呼び出し前にセッションを明示的に更新しておく
-        // （このRPC自体はauth.usersの実データを見るよう修正済みで古いトークンでも動くが、
-        // 念のための保険。詳細はCLAUDE.md参照）。
         try {
           await supabase.auth.refreshSession();
         } catch {
           // 更新に失敗しても致命的ではない（後続のRPC呼び出し自体が正しく判定する）
         }
-        if (cancelled) return;
+        console.log("[cv-debug][" + instanceId + "] about to setEmailConfirmed(true), cancelled=" + cancelled);
+        if (cancelled) {
+          console.log("[cv-debug][" + instanceId + "] bail before setEmailConfirmed, cancelled=true");
+          return;
+        }
         setEmailConfirmed(true);
         setEmail(data.user.email);
+        console.log("[cv-debug][" + instanceId + "] setEmailConfirmed(true) called");
       }
     }
-    checkConfirmed();
-    const { data: sub } = supabase.auth.onAuthStateChange(() => checkConfirmed());
+    checkConfirmed("initial-call");
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      console.log("[cv-debug][" + instanceId + "] onAuthStateChange event=" + event);
+      checkConfirmed("auth-state-change:" + event);
+    });
     return () => {
+      console.log("[cv-debug][" + instanceId + "] EFFECT CLEANUP (unmount or deps changed) - setting cancelled=true");
       cancelled = true;
       sub.subscription.unsubscribe();
     };
@@ -191,7 +199,10 @@ export default function RegisterPage() {
     await refreshMembership();
   }
 
-  console.log("[cv-debug] render", { membershipLoading, memberNumber, emailConfirmed, emailSent, mode });
+  console.log(
+    "[cv-debug] render membershipLoading=" + membershipLoading + " memberNumber=" + memberNumber +
+      " emailConfirmed=" + emailConfirmed + " emailSent=" + emailSent + " mode=" + mode,
+  );
 
   return (
     <div style={styles.page}>
