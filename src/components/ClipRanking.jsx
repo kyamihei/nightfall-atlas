@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, SlidersHorizontal, Play, Flame, Settings, Sparkles } from "lucide-react";
+import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, SlidersHorizontal, Play, Flame, Settings, Sparkles, Smile } from "lucide-react";
 import {
   useClips,
   useReactions,
@@ -125,6 +125,7 @@ function ClipRow({
   const [likeBump, setLikeBump] = useState(0);
   const [dislikeBump, setDislikeBump] = useState(0);
   const [favBump, setFavBump] = useState(0);
+  const [reactionsOpen, setReactionsOpen] = useState(false);
 
   useEffect(() => {
     onCommentsUpdate(clip.id, { comments, submit, submitting, error });
@@ -132,6 +133,7 @@ function ClipRow({
 
   const tagStyle = getTagColor(clip.game);
   const rankAccent = getRankAccent(clip.rank);
+  const totalStampCount = stampCounts ? Object.values(stampCounts).reduce((sum, n) => sum + n, 0) : 0;
 
   return (
     <div
@@ -332,30 +334,53 @@ function ClipRow({
             />
             {favoriteCount > 0 ? favoriteCount : ""}
           </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setReactionsOpen((o) => !o);
+            }}
+            style={{
+              ...styles.actionBtn,
+              color: reactionsOpen || totalStampCount > 0 ? "#EDEDF2" : "#8A8A99",
+              borderColor: reactionsOpen ? "#3A3A48" : "#2E2E3A",
+            }}
+            aria-expanded={reactionsOpen}
+            aria-label="リアクションする"
+          >
+            <Smile size={15} />
+            リアクションする
+            {totalStampCount > 0 && <span style={styles.stampCount}>{totalStampCount}</span>}
+            <ChevronDown
+              size={13}
+              style={{ transform: reactionsOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s ease" }}
+            />
+          </button>
         </div>
       </div>
 
-      <div className="cv-fade-in" style={styles.stampPickerRow} onClick={(e) => e.stopPropagation()}>
-        {REACTION_STAMPS.map((stamp) => {
-          const count = stampCounts?.[stamp] ?? 0;
-          const selected = myStamps?.has(stamp) ?? false;
-          return (
-            <button
-              key={stamp}
-              onClick={() => onToggleStamp(clip.id, stamp)}
-              style={{
-                ...styles.stampBtn,
-                color: selected ? "#FFC857" : "#8A8A99",
-                borderColor: selected ? "#FFC85755" : "#2E2E3A",
-                background: selected ? "#3A2E1466" : "transparent",
-              }}
-            >
-              {stamp}
-              {count > 0 && <span style={styles.stampCount}>{count}</span>}
-            </button>
-          );
-        })}
-      </div>
+      {reactionsOpen && (
+        <div className="cv-fade-in" style={styles.stampPickerRow} onClick={(e) => e.stopPropagation()}>
+          {REACTION_STAMPS.map((stamp) => {
+            const count = stampCounts?.[stamp] ?? 0;
+            const selected = myStamps?.has(stamp) ?? false;
+            return (
+              <button
+                key={stamp}
+                onClick={() => onToggleStamp(clip.id, stamp)}
+                style={{
+                  ...styles.stampBtn,
+                  color: selected ? "#FFC857" : "#8A8A99",
+                  borderColor: selected ? "#FFC85755" : "#2E2E3A",
+                  background: selected ? "#3A2E1466" : "transparent",
+                }}
+              >
+                {stamp}
+                {count > 0 && <span style={styles.stampCount}>{count}</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
     </div>
   );
