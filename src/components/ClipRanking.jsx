@@ -407,17 +407,15 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
           </span>
           <span style={styles.commentTime}>{formatThreadTime(c.created_at)}</span>
           <div style={styles.commentHeadActions}>
-            {!c.parent_id && (
-              <button
-                onClick={() => setReplyTo({ id: c.id, display_name: c.display_name })}
-                style={styles.replyBtn}
-                aria-label="返信"
-                title="このコメントに返信"
-              >
-                <CornerUpLeft size={12} />
-                レス
-              </button>
-            )}
+            <button
+              onClick={() => setReplyTo({ id: c.id, display_name: c.display_name })}
+              style={styles.replyBtn}
+              aria-label="返信"
+              title="このコメントに返信"
+            >
+              <CornerUpLeft size={12} />
+              レス
+            </button>
             <button
               onClick={() => onReport(c.id)}
               disabled={alreadyReported}

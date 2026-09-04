@@ -102,17 +102,15 @@ export default function GeneralThread() {
           <span style={styles.commentName}>{c.display_name}</span>
           <span style={styles.commentTime}>{formatThreadTime(c.created_at)}</span>
           <div style={styles.commentHeadActions}>
-            {!c.parent_id && (
-              <button
-                onClick={() => setReplyTo({ id: c.id, display_name: c.display_name })}
-                style={styles.replyBtn}
-                aria-label="返信"
-                title="このコメントに返信"
-              >
-                <CornerUpLeft size={12} />
-                レス
-              </button>
-            )}
+            <button
+              onClick={() => setReplyTo({ id: c.id, display_name: c.display_name })}
+              style={styles.replyBtn}
+              aria-label="返信"
+              title="このコメントに返信"
+            >
+              <CornerUpLeft size={12} />
+              レス
+            </button>
             <button
               onClick={() => handleReport(c.id)}
               disabled={alreadyReported}

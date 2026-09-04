@@ -121,18 +121,15 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: "対象のクリップが見つかりません" }, 404);
   }
 
-  // 返信先の検証: 同じクリップに属し、かつ返信自体への返信ではない（スレッドは1階層のみ）ことを確認する
+  // 返信先の検証: 同じクリップに属していることのみ確認する（返信への返信も許可、階層制限なし）
   if (parentId) {
     const { data: parentComment, error: parentError } = await supabase
       .from("comments")
-      .select("id, clip_id, parent_id")
+      .select("id, clip_id")
       .eq("id", parentId)
       .maybeSingle();
     if (parentError || !parentComment || parentComment.clip_id !== clipId) {
       return jsonResponse({ error: "返信先のコメントが見つかりません" }, 404);
-    }
-    if (parentComment.parent_id) {
-      return jsonResponse({ error: "返信への返信はできません" }, 400);
     }
   }
 

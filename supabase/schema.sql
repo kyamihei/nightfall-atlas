@@ -1037,7 +1037,7 @@ returns table(id uuid, title text, created_at timestamptz, comment_count bigint)
   order by t.created_at desc;
 $$ language sql stable;
 
--- コメント投稿。返信は1階層のみ（clipのcommentsと同じ仕様）。直近15秒以内の連続投稿は拒否する。
+-- コメント投稿。返信への返信も可（多階層許可、2026-09-04）。直近15秒以内の連続投稿は拒否する。
 drop function if exists post_tag_thread_comment(uuid, text, text, uuid);
 create or replace function post_tag_thread_comment(
   p_thread_id uuid,
@@ -1068,9 +1068,6 @@ begin
     select * into v_parent from tag_thread_comments c where c.id = p_parent_id;
     if not found or v_parent.thread_id <> p_thread_id then
       raise exception '返信先のコメントが見つかりません';
-    end if;
-    if v_parent.parent_id is not null then
-      raise exception '返信への返信はできません';
     end if;
   end if;
 

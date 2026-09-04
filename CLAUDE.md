@@ -1389,6 +1389,29 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   本番オリジンしか許可しないため`通信に失敗しました`表示になる（既知の制約、
   本番では問題なし）。
 
+## 返信への返信を許可（多階層リプライ、2026-09-04追加）
+
+- 「レスのコメントには返信できないようになっているが、基本的にすべてのコメントに
+  レスできるようにして」という要望への対応。直前の5ch風再設計で「返信は元コメント
+  （トップレベル）にのみ可能」という**既存のバックエンド制約**（`post-comment`
+  Edge Functionと`post_tag_thread_comment` RPCが「返信への返信」を拒否していた）を
+  そのままフロント側にも反映していたが、これを撤廃し、**どのコメントにも「レス」
+  ボタンを表示・返信可能**にした。
+- バックエンド: `supabase/functions/post-comment/index.ts`から
+  `if (parentComment.parent_id) { ... "返信への返信はできません" ... }`のチェックを削除し
+  再デプロイ（`npx supabase functions deploy post-comment --project-ref awnwspavalqksllbtkty`）。
+  タグスレ側は`post_tag_thread_comment`関数から同様の`v_parent.parent_id is not null`
+  チェックを削除する新規マイグレーション
+  `supabase/migrations/20260904050000_allow_nested_replies.sql`を本番に適用
+  （`npx supabase db query --linked --file ...`）。`schema.sql`のリファレンス定義も同期。
+- フロント: `GeneralThread.jsx`・`TagThreadDetail.jsx`・`ClipDetail.jsx`・
+  `ClipRanking.jsx`（`CommentSidebar`）の4箇所で「レス」ボタンを囲んでいた
+  `{!c.parent_id && (...)}`条件を削除し、常時表示にした。
+- 表示側の変更は不要だった: `>>N`引用参照はレス番号ベースで、ネスト表示ではなく
+  フラットリスト内に「本文冒頭に引用元番号を表示するだけ」の方式（上記「スレ・コメント欄を
+  5ch風（レス番号・新しい順表示）に再設計」参照）なので、何階層深く返信が連なっても
+  表示ロジックの変更は不要。
+
 # ステアリング
 
 - git commitを行う際は、同じタイミングでリモート（origin）へのpushも必ず行うこと。ユーザーから別途pushを依頼されるのを待たない。
