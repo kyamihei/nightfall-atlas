@@ -1,19 +1,22 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { ArrowLeft, Send, CornerUpLeft, X } from "lucide-react";
-import { useTagThread, useTagThreadComments } from "../lib/use-clip-ranking";
+import { useTagThread, useTagThreadComments, useMembership } from "../lib/use-clip-ranking";
 import { useSmartBack } from "../lib/use-smart-back";
 import { numberCommentsForDisplay, formatThreadTime } from "../lib/thread-format";
 import Footer from "./Footer";
 import BackgroundGlow from "./BackgroundGlow";
+import CommentNameField from "./CommentNameField";
 
 export default function TagThreadDetail() {
   const { id } = useParams();
   const goBack = useSmartBack("/threads");
   const { thread, loading: threadLoading } = useTagThread(id);
   const { comments, submit, submitting, error: commentError } = useTagThreadComments(id);
+  const { nickname } = useMembership();
 
   const [nameDraft, setNameDraft] = useState("");
+  const [useNickname, setUseNickname] = useState(true);
   const [draft, setDraft] = useState("");
   const [localError, setLocalError] = useState("");
   const [replyTo, setReplyTo] = useState(null); // { id, display_name } | null
@@ -28,7 +31,8 @@ export default function TagThreadDetail() {
       return;
     }
     setLocalError("");
-    submit(body, nameDraft, replyTo?.id ?? null);
+    const displayName = nickname && useNickname ? nickname : nameDraft;
+    submit(body, displayName, replyTo?.id ?? null);
     setDraft("");
     setReplyTo(null);
   }
@@ -116,12 +120,13 @@ export default function TagThreadDetail() {
             </button>
           </div>
         )}
-        <input
-          value={nameDraft}
-          onChange={(e) => setNameDraft(e.target.value)}
-          placeholder="名前（任意・空欄なら匿名）"
-          style={styles.nameInput}
-          maxLength={20}
+        <CommentNameField
+          nickname={nickname}
+          useNickname={useNickname}
+          onUseNicknameChange={setUseNickname}
+          freeText={nameDraft}
+          onFreeTextChange={setNameDraft}
+          inputStyle={styles.nameInput}
         />
         <div style={styles.commentInputRow}>
           <textarea

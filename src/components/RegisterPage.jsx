@@ -1,28 +1,48 @@
-import { useEffect, useState } from "react";
-import { ArrowLeft, Award, Loader2, LogIn, Mail, UserPlus } from "lucide-react";
-import { supabase, ensureAnonymousSession } from "../lib/supabase-client";
+import { useState } from "react";
+import { ArrowLeft, Award, Loader2, LogIn, Mail, Radio, UserPlus } from "lucide-react";
+import { supabase } from "../lib/supabase-client";
 import { useMembership } from "../lib/use-clip-ranking";
+import { useAuthConfirmationCallback, linkTwitchIdentity } from "../lib/use-auth-callback";
 import { useSmartBack } from "../lib/use-smart-back";
 import Footer from "./Footer";
 import BackgroundGlow from "./BackgroundGlow";
 
 const REGISTER_PATH = "/register";
 
+function twitchErrorMessage(error) {
+  const msg = error?.message || "";
+  if (/already linked/i.test(msg)) {
+    return "このTwitchアカウントは既に別の会員に連携されています。";
+  }
+  return msg || "Twitchログインに失敗しました。";
+}
+
 /**
- * 会員登録ページ（2026-09-04追加）。「早めに登録した人ほど若い会員番号が付き、後々自慢できる」
- * という要望への対応。匿名セッション（anon_id）をそのまま維持しつつメール+パスワードを
- * 後付けする「匿名→本登録」方式（Supabase Auth）を採用しているため、既存のお気に入り・
- * 配信者タグ・リアクション履歴もこの登録によって失われない。
+ * 会員登録ページ（2026-09-04追加、同日Twitchログイン対応）。「早めに登録した人ほど若い
+ * 会員番号が付き、後々自慢できる」という要望への対応。匿名セッション（anon_id）をそのまま
+ * 維持しつつTwitchアカウント連携またはメール+パスワードを後付けする「匿名→本登録」方式
+ * （Supabase Auth）を採用しているため、既存のお気に入り・配信者タグ・リアクション履歴も
+ * この登録によって失われない。
  *
- * 流れ: ①メールアドレス入力→確認メール送信 ②メール内リンクをクリックして/registerへ戻る
- * （emailRedirectToで同じページに戻す設計、リンクを開いた時点でこのページの再マウント時に
- * セッションの状態から確認済みかどうかを判定する） ③パスワード設定 ④register_member() RPCで
- * 会員番号を発行。既に別の端末で登録済みの場合は「ログイン」タブからメール+パスワードで
- * サインインすれば同じ番号を引き継げる。
+ * Twitchログインを主要な登録手段とし、メール+パスワードは二次的な選択肢として残す
+ * （Twitchアカウントを使いたくない/持っていないユーザー向け）。
+ *
+ * メール流れ: ①メールアドレス入力→確認メール送信 ②メール内リンクをクリックして/registerへ戻る
+ * ③パスワード設定 ④register_member() RPCで会員番号を発行。
+ * Twitch流れ: ①「Twitchでログイン」→Twitch側で認可→/registerへ戻る時点で既にis_anonymousが
+ * falseになっているため、パスワード設定を挟まずそのままregister_member()を呼ぶ。
+ * 既に別の端末で登録済みの場合は「ログイン」タブからメール+パスワードでサインインすれば
+ * 同じ番号を引き継げる（Twitchの場合は同じTwitchアカウントで再度「Twitchでログイン」すれば
+ * 同じ番号に紐づく）。
+ *
+ * OAuth/メール確認からの復帰処理はuseAuthConfirmationCallback（../lib/use-auth-callback）に
+ * 共通化してある（RegisterPage.jsx単体で手書きすると、過去に踏んだrefreshSession()無限
+ * ループのようなバグを再発させるリスクがあるため）。
  */
 export default function RegisterPage() {
   const goBack = useSmartBack("/");
   const { memberNumber, loading: membershipLoading, refresh: refreshMembership } = useMembership();
+  const [showEmailFlow, setShowEmailFlow] = useState(false);
   const [mode, setMode] = useState("register"); // register | login
 
   const [email, setEmail] = useState("");
@@ -38,70 +58,44 @@ export default function RegisterPage() {
   const [loginSubmitting, setLoginSubmitting] = useState(false);
   const [loginError, setLoginError] = useState("");
 
-  // マウント時・認証状態の変化のたびに「メール確認済みか」を見る。確認メールのリンクは
-  // このページ（/register）へ戻ってくるように送るため、リンクを踏んだ直後の再訪問もここで拾える。
-  useEffect(() => {
-    let cancelled = false;
+  const [twitchSubmitting, setTwitchSubmitting] = useState(false);
+  const [twitchError, setTwitchError] = useState("");
 
-    // メール確認リンクを踏んで戻ってきた直後のURLを処理する。PKCEフロー（?code=...）の場合、
-    // supabase-jsのdetectSessionInUrl（既定true）が自動で交換してくれるはずだが、
-    // そのタイミングとこのuseEffectの実行タイミングが競合する可能性を排除するため、
-    // 明示的にexchangeCodeForSessionを呼んでおく（二重に呼んでも実害はない）。
-    // また、リンクが期限切れ/既に使用済み等で失敗した場合はSupabaseが
-    // ?error=...&error_description=...を付けて返してくるため、ここで検知してユーザーに
-    // 表示する（検知しないと「何も起きず入力画面に戻る」という分かりにくい状態になる）。
-    async function handleUrlParams() {
-      const url = new URL(window.location.href);
-      const errorDescription = url.searchParams.get("error_description");
-      const code = url.searchParams.get("code");
-      let handled = false;
+  useAuthConfirmationCallback(async (user, { error: confirmError }) => {
+    if (confirmError) {
+      setError(`確認に失敗しました: ${confirmError}`);
+      return;
+    }
+    if (!user) return;
 
-      if (errorDescription) {
-        setError(`メール内リンクの確認に失敗しました: ${decodeURIComponent(errorDescription)}`);
-        handled = true;
-      } else if (code) {
-        const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-        if (exchangeError) {
-          setError(`メール内リンクの確認に失敗しました: ${exchangeError.message}`);
-        }
-        handled = true;
+    const hasTwitch = (user.identities ?? []).some((i) => i.provider === "twitch");
+    if (hasTwitch) {
+      // Twitch連携完了時点で既に本登録済み（パスワード設定は不要）なので、そのまま会員登録を確定する
+      const { error: rpcError } = await supabase.rpc("register_member");
+      if (rpcError) {
+        setTwitchError(rpcError.message || "会員登録の確定に失敗しました。時間をおいて再度お試しください。");
+        return;
       }
-
-      if (handled) {
-        url.search = "";
-        window.history.replaceState({}, "", url.toString());
-      }
+      await refreshMembership();
+      return;
     }
 
-    async function checkConfirmed() {
-      await handleUrlParams();
-      if (cancelled) return;
-      await ensureAnonymousSession();
-      const { data } = await supabase.auth.getUser();
-      if (cancelled || !data.user) return;
-      if (data.user.email && data.user.is_anonymous === false) {
-        setEmailConfirmed(true);
-        setEmail(data.user.email);
-      }
+    if (user.email) {
+      setEmailConfirmed(true);
+      setEmail(user.email);
     }
-    checkConfirmed();
-    // is_anonymousの判定はauth.usersの実データを見るregister_member() RPC側で行うため、
-    // ここでrefreshSession()を呼んでトークンを強制更新する必要はない（2026-09-04に一度
-    // 「保険」として追加したが、これ自体がTOKEN_REFRESHEDイベントを発生させ、そのイベントで
-    // またcheckConfirmed→refreshSessionが呼ばれる無限ループを引き起こす実害の方が大きい
-    // バグだったため削除した。実際に本番で秒間何十回もトークン更新が走り続ける状態を
-    // 直接確認して特定・修正した）。
-    // SIGNED_INとUSER_UPDATEDだけ拾えば十分（メール確認直後の同一タブでの反映、
-    // ログインタブからのサインイン、いずれもこのどちらかで拾える）。TOKEN_REFRESHEDや
-    // INITIAL_SESSION等の無関係なイベントでは再チェックしない。
-    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "SIGNED_IN" || event === "USER_UPDATED") checkConfirmed();
-    });
-    return () => {
-      cancelled = true;
-      sub.subscription.unsubscribe();
-    };
-  }, []);
+  });
+
+  async function handleTwitchLogin() {
+    setTwitchError("");
+    setTwitchSubmitting(true);
+    const { error: linkError } = await linkTwitchIdentity(`${window.location.origin}${REGISTER_PATH}`);
+    setTwitchSubmitting(false);
+    if (linkError) {
+      setTwitchError(twitchErrorMessage(linkError));
+    }
+    // 成功時はTwitchの認可画面へリダイレクトされるため、ここでは何もしない
+  }
 
   async function handleSendEmail(e) {
     e.preventDefault();
@@ -223,21 +217,39 @@ export default function RegisterPage() {
         </div>
       ) : (
         <>
-          <div style={styles.modeTabs}>
-            <button
-              onClick={() => setMode("register")}
-              style={mode === "register" ? styles.modeTabActive : styles.modeTab}
-            >
-              <UserPlus size={14} />
-              新規登録
-            </button>
-            <button onClick={() => setMode("login")} style={mode === "login" ? styles.modeTabActive : styles.modeTab}>
-              <LogIn size={14} />
-              ログイン
-            </button>
-          </div>
+          <button onClick={handleTwitchLogin} style={styles.twitchBtn} disabled={twitchSubmitting}>
+            <Radio size={16} />
+            {twitchSubmitting ? "接続中…" : "Twitchでログイン"}
+          </button>
+          {twitchError && <p style={styles.errorText}>{twitchError}</p>}
+          <p style={styles.twitchNote}>
+            Twitchアカウントを連携すると、クリップ職人ランキングに載っている場合は職人バッジも使えるようになります。
+          </p>
 
-          {mode === "register" && (
+          {!showEmailFlow ? (
+            <button onClick={() => setShowEmailFlow(true)} style={styles.emailToggleLink}>
+              メールアドレスでも登録できます
+            </button>
+          ) : (
+            <>
+              <div style={styles.modeTabs}>
+                <button
+                  onClick={() => setMode("register")}
+                  style={mode === "register" ? styles.modeTabActive : styles.modeTab}
+                >
+                  <UserPlus size={14} />
+                  新規登録
+                </button>
+                <button
+                  onClick={() => setMode("login")}
+                  style={mode === "login" ? styles.modeTabActive : styles.modeTab}
+                >
+                  <LogIn size={14} />
+                  ログイン
+                </button>
+              </div>
+
+              {mode === "register" && (
             <>
               {!emailConfirmed ? (
                 !emailSent ? (
@@ -332,6 +344,8 @@ export default function RegisterPage() {
               </button>
             </form>
           )}
+            </>
+          )}
         </>
       )}
 
@@ -367,6 +381,31 @@ const styles = {
   h1: { fontSize: 24, fontWeight: 600, margin: "0 0 6px" },
   tagline: { fontSize: 13, color: "#6B6B78", margin: "0 0 24px", lineHeight: 1.6 },
   loadingRow: { display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, color: "#8A8A99" },
+  twitchBtn: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    width: "100%",
+    background: "#7E14FF",
+    border: "none",
+    borderRadius: 8,
+    color: "#EDEDF2",
+    padding: "13px 16px",
+    fontSize: 15,
+    fontWeight: 700,
+  },
+  twitchNote: { fontSize: 12, color: "#6B6B78", margin: "10px 0 22px", lineHeight: 1.6 },
+  emailToggleLink: {
+    display: "inline-flex",
+    background: "none",
+    border: "none",
+    color: "#8A8A99",
+    fontSize: 12.5,
+    textDecoration: "underline",
+    padding: 0,
+    marginBottom: 20,
+  },
   modeTabs: { display: "flex", gap: 8, marginBottom: 20 },
   modeTab: {
     display: "inline-flex",

@@ -1427,6 +1427,69 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   見ていないため、同じ実装をそのまま流用できない（別途RPCが必要）。ユーザーから明示的な
   要望があれば対応する。
 
+## Twitchログイン・ニックネーム・クリップ職人バッジ機能（2026-09-04追加）
+
+要望: (1) Twitchアカウントでログイン (2) Twitchログイン時にクリップ職人ランキングと紐付け
+(3) ランキング入りの人は着脱可能なバッジをつけられる (4) マイページでランキング確認
+(5) ニックネーム設定 (6) コメント投稿時にニックネーム/匿名を選べる。詳細な設計はEnterPlanMode
+で作成した計画（`~/.claude/plans/flickering-wishing-ripple.md`）を参照。配信者ランキングとの
+紐付けは今回は対象外（`clips.streamer`が名前文字列のみでクリップ職人の`creator_id`ほど
+確実な照合キーがないため）。
+
+- **DB**（`supabase/migrations/20260904060000_twitch_login_nickname_badge.sql`）:
+  `members`に`twitch_user_id`/`twitch_login`/`twitch_display_name`/`nickname`/
+  `clipper_badge_enabled`列を追加。`register_member()`を拡張し、`auth.identities`から
+  Twitch識別情報をサーバー側で読み取ってmembersへ同期する（クライアントから
+  `twitch_user_id`を受け取らない設計、なりすまし防止）。新規RPC`set_nickname()`・
+  `set_clipper_badge_enabled()`（有効化時は`top_clippers_mv`で資格をサーバー側で再検証）。
+  `get_comment_member_numbers()`に`clipper_badge`列を追加。**membersテーブル一式が
+  これまで`schema.sql`に反映されていなかった不備をこの機会にまとめて解消した。**
+- **Twitchログイン**: `signInWithOAuth`ではなく`supabase.auth.linkIdentity({provider:"twitch"})`
+  を使用（`src/lib/use-auth-callback.js`の`linkTwitchIdentity()`）。匿名セッションの
+  `auth.uid()`を維持したまま昇格させ、既存のお気に入り・タグ・スタンプ・コメントを
+  引き継ぐため（既存のメール登録が`updateUser({email})`を使っているのと同じ考え方）。
+  OAuth/メール確認からの復帰処理は`useAuthConfirmationCallback`に共通化した
+  （`RegisterPage.jsx`が過去に踏んだ「`refreshSession()`を保険で呼んだらTOKEN_REFRESHED
+  無限ループになった」というバグの教訓を、2箇所以上に手書きで複製して再発させないため）。
+  **実機未検証（Twitch Developer Console・Supabaseダッシュボード側の設定がユーザー作業待ちのため）**:
+  `auth.identities.identity_data`の実際のJSONキー名（ログイン名/表示名側、`provider_id`列
+  自体は確実）。実際にTwitchでログインした後、`select identity_data from auth.identities
+  where provider='twitch' order by created_at desc limit 1`で確認し、必要なら
+  `register_member()`のcoalesce部分を追従修正すること。
+  **判明した追加の前提設定**: Supabaseダッシュボードで単にTwitchプロバイダを有効化するだけでは
+  不十分で、`linkIdentity()`は「Manual Linking」という認証設定が別途有効化されていないと
+  `"Manual linking is disabled"`エラーになることをlocalhostでの動作確認で確認した
+  （Authentication側の設定、プロバイダ有効化とは別項目）。ユーザーへの外部設定依頼に
+  この項目を追加済み。
+- **RegisterPage.jsx**: Twitchログインを画面最上部の主要CTAにし、既存のメール/パスワード
+  registration/login UIは「メールアドレスでも登録できます」の下に折りたたんで残した
+  （`showEmailFlow`ステート）。
+- **マイページ**（新規`src/components/MyPage.jsx`、ルート`/mypage`）: 会員番号・登録日、
+  Twitch連携状況（未連携ならリンクボタン、連携済みならクリップ職人ページへのリンク）、
+  クリップ職人統計（`get_clipper_stats(twitch_user_id)`を`ClipperDetail.jsx`と共用）、
+  ニックネーム編集、クリップ職人バッジのオン/オフトグルを表示。`ClipRanking.jsx`ヘッダーの
+  「会員 #N」表示を`/mypage`へのリンクに変更した。
+- **クリップ職人バッジ表示**: `useCommentMemberBadges`の戻り値を`Record<string, number>`から
+  `Record<string, {memberNumber, clipperBadge}>`に変更（`get_comment_member_numbers`RPC
+  拡張と対応）。`ClipDetail.jsx`・`ClipRanking.jsx`の`CommentSidebar`・`GeneralThread.jsx`
+  の3箇所（既存の会員番号バッジと同じ配置）に、紫色（`#7E14FF`）の`Scissors`アイコン付き
+  「クリップ職人」バッジを追加表示。`TagThreadDetail.jsx`は既存の会員番号バッジ非対応
+  ギャップと同様、クリップ職人バッジも対象外のまま。
+- **コメント投稿時のニックネーム/匿名選択**: 新規共通コンポーネント
+  `src/components/CommentNameField.jsx`。ニックネーム未設定/非会員には従来通りの自由入力欄を
+  そのまま表示し、ニックネーム設定済みの会員にだけ「ニックネームで投稿」/「匿名で投稿」の
+  トグルを出す。バックエンド変更は不要（`post-comment` Edge Functionも
+  `post_tag_thread_comment` RPCも元々自由入力の`display_name`を受け取れる）。対象は
+  `ClipDetail.jsx`・`GeneralThread.jsx`・`TagThreadDetail.jsx`・`ClipRanking.jsx`の
+  `CommentSidebar`の4箇所全部（バッジ表示とは異なりタグスレも対象、バックエンド変更が
+  不要なため一貫性を優先）。`CommentSidebar`は`nameDraft`と同様、`nickname`も親の
+  `ClipRanking`から`useMembership()`経由でpropsとして受け取る設計にした（同じフックを
+  親子で別々に呼ぶと状態が分裂するという既知の落とし穴を避けるため）。
+- **未実施（ユーザー側の外部設定待ち）**: Twitch Developer ConsoleでのOAuth Redirect URL
+  追加、Supabaseダッシュボードでのプロバイダ有効化＋Manual Linking有効化、Redirect URLs
+  への`/mypage`追加。完了後、実際のTwitchログインで上記の要検証項目を確認し、必要なら
+  追従マイグレーションを当てること。
+
 # ステアリング
 
 - git commitを行う際は、同じタイミングでリモート（origin）へのpushも必ず行うこと。ユーザーから別途pushを依頼されるのを待たない。

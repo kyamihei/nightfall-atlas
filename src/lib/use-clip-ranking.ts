@@ -595,9 +595,29 @@ export function useComments(clipId: string) {
  * membersテーブルのSELECTポリシーは本人の行のみ許可しているため、ここで取れるのは
  * 自分の会員番号だけ（「もう登録済みか」の判定用）。
  */
+export interface MembershipProfile {
+  memberNumber: number | null;
+  twitchUserId: string | null;
+  twitchLogin: string | null;
+  twitchDisplayName: string | null;
+  nickname: string | null;
+  clipperBadgeEnabled: boolean;
+  registeredAt: string | null;
+}
+
+const EMPTY_MEMBERSHIP_PROFILE: MembershipProfile = {
+  memberNumber: null,
+  twitchUserId: null,
+  twitchLogin: null,
+  twitchDisplayName: null,
+  nickname: null,
+  clipperBadgeEnabled: false,
+  registeredAt: null,
+};
+
 export function useMembership() {
-  const [memberNumber, setMemberNumber] = useState<number | null>(null);
-  // 匿名セッションかどうか（＝メール+パスワードでログイン済みの本登録アカウントかどうか）。
+  const [profile, setProfile] = useState<MembershipProfile>(EMPTY_MEMBERSHIP_PROFILE);
+  // 匿名セッションかどうか（＝メール+パスワードまたはTwitchでログイン済みの本登録アカウントか）。
   // ヘッダーの「会員登録」リンクを、既にログイン中のユーザーには出さないようにする判定に使う
   // （ログイン中に「新規登録」フォームへ入ると、既存メールの変更フローに入ってしまい
   // 混乱を招く不具合が実際に発生したため、2026-09-04追加）。
@@ -608,8 +628,26 @@ export function useMembership() {
     setLoading(true);
     const user = await ensureAnonymousSession();
     setIsAnonymous(user.is_anonymous ?? true);
-    const { data } = await supabase.from("members").select("member_number").eq("id", user.id).maybeSingle();
-    setMemberNumber(data?.member_number ?? null);
+    const { data } = await supabase
+      .from("members")
+      .select(
+        "member_number, twitch_user_id, twitch_login, twitch_display_name, nickname, clipper_badge_enabled, registered_at",
+      )
+      .eq("id", user.id)
+      .maybeSingle();
+    setProfile(
+      data
+        ? {
+            memberNumber: data.member_number,
+            twitchUserId: data.twitch_user_id,
+            twitchLogin: data.twitch_login,
+            twitchDisplayName: data.twitch_display_name,
+            nickname: data.nickname,
+            clipperBadgeEnabled: data.clipper_badge_enabled ?? false,
+            registeredAt: data.registered_at,
+          }
+        : EMPTY_MEMBERSHIP_PROFILE,
+    );
     setLoading(false);
   }, []);
 
@@ -617,16 +655,39 @@ export function useMembership() {
     refresh();
   }, [refresh]);
 
-  return { memberNumber, isAnonymous, loading, refresh };
+  const setNickname = useCallback(
+    async (nickname: string) => {
+      const { error } = await supabase.rpc("set_nickname", { p_nickname: nickname });
+      if (error) throw error;
+      await refresh();
+    },
+    [refresh],
+  );
+
+  const setClipperBadgeEnabled = useCallback(
+    async (enabled: boolean) => {
+      const { error } = await supabase.rpc("set_clipper_badge_enabled", { p_enabled: enabled });
+      if (error) throw error;
+      await refresh();
+    },
+    [refresh],
+  );
+
+  return { ...profile, isAnonymous, loading, refresh, setNickname, setClipperBadgeEnabled };
+}
+
+export interface CommentBadge {
+  memberNumber: number;
+  clipperBadge: boolean;
 }
 
 /**
- * コメントIDの配列を渡すと、投稿者が会員なら会員番号を返す（コメント欄の会員バッジ表示用）。
- * get_comment_member_numbers RPCがcomments.anon_idを直接クライアントへ返さずJOIN結果だけを
- * 渡す設計のため、匿名IDを晒さずに済む。
+ * コメントIDの配列を渡すと、投稿者が会員なら会員番号とクリップ職人バッジの有無を返す
+ * （コメント欄のバッジ表示用）。get_comment_member_numbers RPCがcomments.anon_idを直接
+ * クライアントへ返さずJOIN結果だけを渡す設計のため、匿名IDを晒さずに済む。
  */
 export function useCommentMemberBadges(commentIds: string[]) {
-  const [badges, setBadges] = useState<Record<string, number>>({});
+  const [badges, setBadges] = useState<Record<string, CommentBadge>>({});
   const key = commentIds.join(",");
 
   useEffect(() => {
@@ -638,9 +699,13 @@ export function useCommentMemberBadges(commentIds: string[]) {
     (async () => {
       const { data } = await supabase.rpc("get_comment_member_numbers", { comment_ids: key.split(",") });
       if (cancelled) return;
-      const next: Record<string, number> = {};
-      for (const row of (data ?? []) as { comment_id: string; member_number: number }[]) {
-        next[row.comment_id] = row.member_number;
+      const next: Record<string, CommentBadge> = {};
+      for (const row of (data ?? []) as {
+        comment_id: string;
+        member_number: number;
+        clipper_badge: boolean;
+      }[]) {
+        next[row.comment_id] = { memberNumber: row.member_number, clipperBadge: row.clipper_badge };
       }
       setBadges(next);
     })();

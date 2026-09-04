@@ -27,6 +27,7 @@ import { useActivityFeedPrefs, ACTIVITY_FEED_TYPES } from "../lib/use-activity-f
 import { numberCommentsForDisplay, formatThreadTime } from "../lib/thread-format";
 import Footer from "./Footer";
 import BackgroundGlow from "./BackgroundGlow";
+import CommentNameField from "./CommentNameField";
 
 const PERIOD_TABS = [
   { value: "all", label: "全期間" },
@@ -365,7 +366,16 @@ function ClipRow({
  * コメントの購読はClipRow側で行っているため、ここでは親から渡されたデータを表示するだけ
  * （同一clipへの二重購読を避けるため、自前でuseCommentsは呼ばない）。
  */
-function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, reportedIds, onReport, onClose }) {
+function CommentSidebar({
+  clip,
+  commentsData,
+  nameDraft,
+  onNameDraftChange,
+  nickname,
+  reportedIds,
+  onReport,
+  onClose,
+}) {
   const { comments, submit, submitting, error } = commentsData ?? {
     comments: [],
     submit: () => {},
@@ -373,6 +383,7 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
     error: null,
   };
   const [draft, setDraft] = useState("");
+  const [useNickname, setUseNickname] = useState(true);
   const [localError, setLocalError] = useState("");
   const [replyTo, setReplyTo] = useState(null); // { id, display_name } | null
 
@@ -389,7 +400,8 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
       return;
     }
     setLocalError("");
-    submit(body, nameDraft, replyTo?.id ?? null);
+    const displayName = nickname && useNickname ? nickname : nameDraft;
+    submit(body, displayName, replyTo?.id ?? null);
     setDraft("");
     setReplyTo(null);
   }
@@ -403,7 +415,15 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
           <span style={styles.postNumber}>{c.number}</span>
           <span style={styles.commentName}>
             {c.display_name}
-            {memberBadges[c.id] && <span style={styles.memberBadge}>#{memberBadges[c.id]}</span>}
+            {memberBadges[c.id]?.memberNumber && (
+              <span style={styles.memberBadge}>#{memberBadges[c.id].memberNumber}</span>
+            )}
+            {memberBadges[c.id]?.clipperBadge && (
+              <span style={styles.clipperBadge}>
+                <Scissors size={9} />
+                クリップ職人
+              </span>
+            )}
           </span>
           <span style={styles.commentTime}>{formatThreadTime(c.created_at)}</span>
           <div style={styles.commentHeadActions}>
@@ -470,12 +490,13 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
             </button>
           </div>
         )}
-        <input
-          value={nameDraft}
-          onChange={(e) => onNameDraftChange(e.target.value)}
-          placeholder="名前（任意・空欄なら匿名）"
-          style={styles.nameInput}
-          maxLength={20}
+        <CommentNameField
+          nickname={nickname}
+          useNickname={useNickname}
+          onUseNicknameChange={setUseNickname}
+          freeText={nameDraft}
+          onFreeTextChange={onNameDraftChange}
+          inputStyle={styles.nameInput}
         />
         <div style={styles.commentInputRow}>
           <textarea
@@ -706,7 +727,12 @@ export default function ClipRanking() {
   // ヘッダーの「会員登録」リンクをログイン中のユーザーには出さない・代わりにログアウトを
   // 出す判定用（2026-09-04追加。ログイン中に「新規登録」フォームへ入ると既存メールの変更
   // フローに入ってしまい混乱を招く不具合が実際に発生したための対応）。
-  const { memberNumber, isAnonymous: isAnonymousSession, loading: membershipLoading } = useMembership();
+  const {
+    memberNumber,
+    nickname,
+    isAnonymous: isAnonymousSession,
+    loading: membershipLoading,
+  } = useMembership();
   async function handleLogout() {
     await supabase.auth.signOut({ scope: "local" });
     window.location.reload(); // 新しい匿名セッションで全データを作り直すのが確実なため
@@ -1016,10 +1042,10 @@ export default function ClipRanking() {
             {!membershipLoading && !isAnonymousSession ? (
               <>
                 {memberNumber !== null && (
-                  <span className="cv-nav-link" style={styles.navLinkStatic}>
+                  <Link to="/mypage" className="cv-nav-link" style={styles.navLinkStatic}>
                     <Award size={15} />
                     会員 #{memberNumber}
-                  </span>
+                  </Link>
                 )}
                 <button onClick={handleLogout} className="cv-nav-link" style={styles.navLinkBtn}>
                   <LogOut size={15} />
@@ -1392,6 +1418,7 @@ export default function ClipRanking() {
               commentsData={commentsDataByClip[activeClip.id]}
               nameDraft={nameDraft}
               onNameDraftChange={setNameDraft}
+              nickname={nickname}
               reportedIds={reportedIds}
               onReport={handleReport}
               onClose={() => setActiveCommentClipId(null)}
@@ -2003,6 +2030,20 @@ const styles = {
     border: "1px solid #FF4D6D40",
     borderRadius: 20,
     padding: "1px 6px",
+    verticalAlign: 1,
+  },
+  clipperBadge: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 3,
+    marginLeft: 6,
+    fontSize: 10.5,
+    fontWeight: 700,
+    color: "#7E14FF",
+    background: "#7E14FF1A",
+    border: "1px solid #7E14FF40",
+    borderRadius: 20,
+    padding: "1px 7px 1px 6px",
     verticalAlign: 1,
   },
   commentTime: { fontSize: 11.5, color: "#6B6B78", fontFamily: "'Consolas', monospace" },

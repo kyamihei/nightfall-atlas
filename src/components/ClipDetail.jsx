@@ -12,6 +12,7 @@ import {
   useBroadcasterAvatars,
   useClipperRanks,
   useCommentMemberBadges,
+  useMembership,
   REACTION_STAMPS,
 } from "../lib/use-clip-ranking";
 import { REACTIONS_ENABLED } from "../lib/feature-flags";
@@ -21,6 +22,7 @@ import { numberCommentsForDisplay, formatThreadTime } from "../lib/thread-format
 import Footer from "./Footer";
 import BackgroundGlow from "./BackgroundGlow";
 import ShareButtons from "./ShareButtons";
+import CommentNameField from "./CommentNameField";
 
 function formatViews(n) {
   return new Intl.NumberFormat("ja-JP").format(n);
@@ -69,7 +71,9 @@ export default function ClipDetail() {
     path: clip ? `/clips/${clip.id}` : null,
   });
 
+  const { nickname } = useMembership();
   const [nameDraft, setNameDraft] = useState("");
+  const [useNickname, setUseNickname] = useState(true);
   const [draft, setDraft] = useState("");
   const [localError, setLocalError] = useState("");
   const [reportedIds, setReportedIds] = useState(new Set());
@@ -85,7 +89,8 @@ export default function ClipDetail() {
       return;
     }
     setLocalError("");
-    submit(body, nameDraft, replyTo?.id ?? null);
+    const displayName = nickname && useNickname ? nickname : nameDraft;
+    submit(body, displayName, replyTo?.id ?? null);
     setDraft("");
     setReplyTo(null);
   }
@@ -105,7 +110,15 @@ export default function ClipDetail() {
           <span style={styles.postNumber}>{c.number}</span>
           <span style={styles.commentName}>
             {c.display_name}
-            {memberBadges[c.id] && <span style={styles.memberBadge}>#{memberBadges[c.id]}</span>}
+            {memberBadges[c.id]?.memberNumber && (
+              <span style={styles.memberBadge}>#{memberBadges[c.id].memberNumber}</span>
+            )}
+            {memberBadges[c.id]?.clipperBadge && (
+              <span style={styles.clipperBadge}>
+                <Scissors size={9} />
+                クリップ職人
+              </span>
+            )}
           </span>
           <span style={styles.commentTime}>{formatThreadTime(c.created_at)}</span>
           <div style={styles.commentHeadActions}>
@@ -309,12 +322,13 @@ export default function ClipDetail() {
               </button>
             </div>
           )}
-          <input
-            value={nameDraft}
-            onChange={(e) => setNameDraft(e.target.value)}
-            placeholder="名前（任意・空欄なら匿名）"
-            style={styles.nameInput}
-            maxLength={20}
+          <CommentNameField
+            nickname={nickname}
+            useNickname={useNickname}
+            onUseNicknameChange={setUseNickname}
+            freeText={nameDraft}
+            onFreeTextChange={setNameDraft}
+            inputStyle={styles.nameInput}
           />
           <div style={styles.commentInputRow}>
             <textarea
@@ -470,6 +484,20 @@ const styles = {
     border: "1px solid #FF4D6D40",
     borderRadius: 20,
     padding: "1px 6px",
+    verticalAlign: 1,
+  },
+  clipperBadge: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 3,
+    marginLeft: 6,
+    fontSize: 10.5,
+    fontWeight: 700,
+    color: "#7E14FF",
+    background: "#7E14FF1A",
+    border: "1px solid #7E14FF40",
+    borderRadius: 20,
+    padding: "1px 7px 1px 6px",
     verticalAlign: 1,
   },
   commentTime: { fontSize: 11.5, color: "#6B6B78", fontFamily: "'Consolas', monospace" },
