@@ -18,6 +18,7 @@ import {
   useTrendingClips,
   useActivityFeed,
   useMyBroadcasterTags,
+  useCommentMemberBadges,
 } from "../lib/use-clip-ranking";
 import { REACTIONS_ENABLED } from "../lib/feature-flags";
 import { useActivityFeedPrefs, ACTIVITY_FEED_TYPES } from "../lib/use-activity-feed-prefs";
@@ -380,6 +381,9 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
   const [localError, setLocalError] = useState("");
   const [replyTo, setReplyTo] = useState(null); // { id, display_name } | null
 
+  const commentIds = useMemo(() => comments.map((c) => c.id), [comments]);
+  const memberBadges = useCommentMemberBadges(commentIds);
+
   const topLevel = comments.filter((c) => !c.parent_id);
   const repliesByParent = comments.reduce((acc, c) => {
     if (!c.parent_id) return acc;
@@ -404,7 +408,10 @@ function CommentSidebar({ clip, commentsData, nameDraft, onNameDraftChange, repo
     return (
       <div key={c.id} style={isReply ? styles.commentItemReply : styles.commentItem}>
         <div style={styles.commentHead}>
-          <span style={styles.commentName}>{c.display_name}</span>
+          <span style={styles.commentName}>
+            {c.display_name}
+            {memberBadges[c.id] && <span style={styles.memberBadge}>#{memberBadges[c.id]}</span>}
+          </span>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={styles.commentTime}>{timeAgo(new Date(c.created_at).getTime())}</span>
             {!isReply && (
@@ -1014,6 +1021,10 @@ export default function ClipRanking() {
             <Link to="/favorites" className="cv-nav-link" style={styles.navLink}>
               <Star size={15} />
               お気に入り
+            </Link>
+            <Link to="/register" className="cv-nav-link" style={styles.navLink}>
+              <UserPlus size={15} />
+              会員登録
             </Link>
             <a
               href="https://x.com/kurisure_info"
@@ -1966,6 +1977,18 @@ const styles = {
   replyIndent: { marginLeft: 16, paddingLeft: 10, borderLeft: "2px solid #2A2A36", marginBottom: 6 },
   commentHead: { display: "flex", justifyContent: "space-between", marginBottom: 3 },
   commentName: { fontSize: 12.5, fontWeight: 500, color: "#C4C4D0" },
+  memberBadge: {
+    display: "inline-block",
+    marginLeft: 6,
+    fontSize: 10.5,
+    fontWeight: 700,
+    color: "#FF4D6D",
+    background: "#FF4D6D1A",
+    border: "1px solid #FF4D6D40",
+    borderRadius: 20,
+    padding: "1px 6px",
+    verticalAlign: 1,
+  },
   commentTime: { fontSize: 11.5, color: "#5A5A66" },
   commentBody: { fontSize: 13.5, margin: 0, lineHeight: 1.5, color: "#DADAE2" },
   reportBtn: {

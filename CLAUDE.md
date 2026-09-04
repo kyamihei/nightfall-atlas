@@ -1014,6 +1014,63 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   文面を見直す（または`NewSiteBanner`自体を削除する）必要がある。ユーザーから
   明示的な削除・変更の指示が無くても、season性のある文言だという点を踏まえておくこと。
 
+## 会員登録機能（2026-09-04追加）
+
+- 「番号を1から振っていく、早めに登録した人ほど若い番号で後々自慢できる」という要望への対応。
+  会員限定機能の第一弾は「コメント欄に会員番号バッジを表示」（ユーザーと相談の上、まずはこれだけに
+  スコープを絞った）。
+- **登録方式**: 匿名セッション（anon_id）をそのまま維持しつつメール+パスワードを後付けする
+  「匿名→本登録」方式（Supabase Authの標準機能）を採用。単純にanon_idへ連番を振るだけの方式
+  （メール不要）も検討したが、ブラウザデータを消すと番号を失うため「ずっと自慢できる番号」には
+  ふさわしくないと判断し、ユーザーの同意のもとこちらを選んだ。この方式なら`auth.uid()`が
+  登録前後で変わらないため、既存のお気に入り・配信者タグ・リアクションスタンプ・コメント履歴も
+  そのまま引き継がれる。
+  - フロントの実装は`src/components/RegisterPage.jsx`（`/register`）。
+    ①メールアドレス入力→`supabase.auth.updateUser({email}, {emailRedirectTo: ".../register"})`で
+    確認メール送信 ②メール内リンクを開くと同じ`/register`へ戻ってくる設計にしており、
+    再訪問時に`supabase.auth.getUser()`の`is_anonymous`が`false`になっていれば次のステップへ
+    自動的に進む ③パスワード設定（`updateUser({password})`）④`register_member()` RPCで
+    会員番号を発行。既に会員なら`useMembership`が拾って「あなたの会員番号は#N」の画面を出す。
+  - **別デバイスでのログイン**も同じページに実装済み（`supabase.auth.signInWithPassword`）。
+    ログインするとそのブラウザのSupabaseセッションが登録済みアカウントのものに置き換わり、
+    以降`ensureAnonymousSession()`が返す`user.id`（＝`auth.uid()`）が同じになるため、
+    お気に入り/配信者タグ/リアクションスタンプ等の**全ての既存フックが変更なしでそのまま
+    同期される**（これらは元々すべて`anon_id = auth.uid()`でRLS/クエリしているため）。
+    - **既知の制約**: ログインする前にそのデバイス（ブラウザ）で匿名のまま既に
+      お気に入り等を使っていた場合、その分は別のanon_idに紐づいたまま残り、
+      ログイン後のアカウントには自動マージされない（単に見えなくなるだけでDB上は残る）。
+      複数デバイスを渡り歩く前提のヘビーユーザーはそう多くない想定のため、
+      現状は明示的なマージ機能は作っていない。要望が出れば別途検討。
+  - **DB**: `supabase/migrations/20260904000000_members.sql`（本番へ適用済み、2026-09-04）。
+    `members(id uuid primary key references auth.users, member_number integer generated
+    always as identity, registered_at)`。RLSは本人の行のみSELECT可、INSERT/UPDATE/DELETE用の
+    ポリシーはあえて用意していない（ポリシー無し＝拒否、書き込みは`register_member()`
+    security definer RPC経由のみに限定）。
+    - `register_member()`: `auth.jwt()->>'is_anonymous'`が`true`（＝メール確認未完了）なら
+      例外を投げて拒否する。冪等（既に登録済みなら何もせず既存の番号を返す）。
+      実際にanonymousユーザーで呼び出し、正しく拒否されることを本番で確認済み
+      （テスト用の匿名ユーザー行は削除済み）。
+    - `get_comment_member_numbers(comment_ids uuid[])`: コメント一覧に会員バッジを表示するための
+      RPC。`comments.anon_id`をクライアントへ直接返さず（既存の「表示はしない、開示請求対応用」
+      方針を踏襲）、`comments`と`members`をJOINした結果（comment_id・member_numberのみ）を
+      security definerで返す。
+  - フロント側フック（`useMembership`/`useCommentMemberBadges`）は`src/lib/use-clip-ranking.ts`、
+    バッジ表示は`ClipRanking.jsx`（`CommentSidebar`）・`ClipDetail.jsx`の両方
+    （既存の「コメントUIはこの2箇所に重複実装」パターンを踏襲）。総合スレ/タグスレの
+    コメント（`tag_thread_comments`）にはまだ対応していない（要望が出れば同じパターンで追加可能）。
+- **要調査・未検証（2026-09-04時点）**: このサイトで初めて実際にメールを送信する機能のため、
+  以下はユーザー側でのSupabaseダッシュボード確認・本番での実地確認が必要
+  （本セッションではメール受信ができないため、テストできなかった）。
+  - Authentication → URL Configuration → Redirect URLsに`https://kurisure.jp/register`
+    （開発時は`http://localhost:5173/register`等）が登録されているか。
+  - デフォルトのSupabaseメール送信は件数制限が厳しめ（無料枠は目安1時間あたり数通程度）。
+    登録者が増える想定ならカスタムSMTPの設定を検討すること。
+  - 「メール確認リンクをクリック→`/register`にリダイレクト→自動で次のステップへ進む」という
+    挙動そのもの（`emailRedirectTo`の実際の遷移・`is_anonymous`が正しく`false`になるタイミング）
+    は公式ドキュメントの記述をもとに実装したのみで、実際にメールを受信して確認する
+    エンドツーエンドの動作確認はできていない。初回の実登録トライで問題が出た場合は
+    ここを疑うこと。
+
 # ステアリング
 
 - git commitを行う際は、同じタイミングでリモート（origin）へのpushも必ず行うこと。ユーザーから別途pushを依頼されるのを待たない。

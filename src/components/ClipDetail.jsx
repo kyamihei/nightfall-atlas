@@ -11,6 +11,7 @@ import {
   useCommentReport,
   useBroadcasterAvatars,
   useClipperRanks,
+  useCommentMemberBadges,
   REACTION_STAMPS,
 } from "../lib/use-clip-ranking";
 import { REACTIONS_ENABLED } from "../lib/feature-flags";
@@ -64,6 +65,8 @@ export default function ClipDetail() {
   const clipperRanks = useClipperRanks(clip ? [clip.creator_id] : []);
   const { comments, submit, submitting, error: commentError } = useComments(id);
   const { report: reportComment } = useCommentReport();
+  const commentIds = useMemo(() => comments.map((c) => c.id), [comments]);
+  const memberBadges = useCommentMemberBadges(commentIds);
 
   useDocumentMeta({
     title: clip ? `${clip.title} - ${clip.streamer} | クリスレ` : null,
@@ -266,7 +269,10 @@ export default function ClipDetail() {
               <div key={c.id}>
                 <div style={styles.commentItem}>
                   <div style={styles.commentHead}>
-                    <span style={styles.commentName}>{c.display_name}</span>
+                    <span style={styles.commentName}>
+                      {c.display_name}
+                      {memberBadges[c.id] && <span style={styles.memberBadge}>#{memberBadges[c.id]}</span>}
+                    </span>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <span style={styles.commentTime}>{timeAgo(new Date(c.created_at).getTime())}</span>
                       <button
@@ -299,7 +305,10 @@ export default function ClipDetail() {
                     <div key={r.id} style={styles.replyIndent}>
                       <div style={styles.commentItemReply}>
                         <div style={styles.commentHead}>
-                          <span style={styles.commentName}>{r.display_name}</span>
+                          <span style={styles.commentName}>
+                            {r.display_name}
+                            {memberBadges[r.id] && <span style={styles.memberBadge}>#{memberBadges[r.id]}</span>}
+                          </span>
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             <span style={styles.commentTime}>{timeAgo(new Date(r.created_at).getTime())}</span>
                             <button
@@ -487,6 +496,18 @@ const styles = {
   replyIndent: { marginLeft: 20, paddingLeft: 12, borderLeft: "2px solid #24242F", marginTop: 8 },
   commentHead: { display: "flex", justifyContent: "space-between", marginBottom: 3 },
   commentName: { fontSize: 12.5, fontWeight: 500, color: "#C4C4D0" },
+  memberBadge: {
+    display: "inline-block",
+    marginLeft: 6,
+    fontSize: 10.5,
+    fontWeight: 700,
+    color: "#FF4D6D",
+    background: "#FF4D6D1A",
+    border: "1px solid #FF4D6D40",
+    borderRadius: 20,
+    padding: "1px 6px",
+    verticalAlign: 1,
+  },
   commentTime: { fontSize: 11.5, color: "#5A5A66" },
   commentBody: { fontSize: 13.5, margin: 0, lineHeight: 1.5, color: "#DADAE2" },
   reportBtn: { background: "transparent", border: "none", padding: 2, display: "flex", alignItems: "center" },

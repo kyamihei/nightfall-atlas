@@ -587,6 +587,66 @@ export function useComments(clipId: string) {
   return { comments, submit, submitting, error };
 }
 
+/**
+ * 会員登録機能（2026-09-04追加）。「早めに登録した人ほど若い番号が付き、後々自慢できる」
+ * という要望に対応するため、匿名セッション（anon_id）を維持したままメール+パスワードで
+ * 本登録した場合に限り会員番号が発行される（詳細はsupabase/migrations/20260904000000_members.sql、
+ * フロント側の登録フローはRegisterPage.jsx参照）。
+ * membersテーブルのSELECTポリシーは本人の行のみ許可しているため、ここで取れるのは
+ * 自分の会員番号だけ（「もう登録済みか」の判定用）。
+ */
+export function useMembership() {
+  const [memberNumber, setMemberNumber] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    const user = await ensureAnonymousSession();
+    const { data } = await supabase.from("members").select("member_number").eq("id", user.id).maybeSingle();
+    setMemberNumber(data?.member_number ?? null);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  return { memberNumber, loading, refresh };
+}
+
+/**
+ * コメントIDの配列を渡すと、投稿者が会員なら会員番号を返す（コメント欄の会員バッジ表示用）。
+ * get_comment_member_numbers RPCがcomments.anon_idを直接クライアントへ返さずJOIN結果だけを
+ * 渡す設計のため、匿名IDを晒さずに済む。
+ */
+export function useCommentMemberBadges(commentIds: string[]) {
+  const [badges, setBadges] = useState<Record<string, number>>({});
+  const key = commentIds.join(",");
+
+  useEffect(() => {
+    if (!key) {
+      setBadges({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.rpc("get_comment_member_numbers", { comment_ids: key.split(",") });
+      if (cancelled) return;
+      const next: Record<string, number> = {};
+      for (const row of (data ?? []) as { comment_id: string; member_number: number }[]) {
+        next[row.comment_id] = row.member_number;
+      }
+      setBadges(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  return badges;
+}
+
 export interface BroadcasterSearchResult {
   broadcaster_id: string;
   broadcaster_name: string;
