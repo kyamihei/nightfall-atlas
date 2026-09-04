@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, Calendar, Play, Flame, Settings, Sparkles } from "lucide-react";
+import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, SlidersHorizontal, Play, Flame, Settings, Sparkles } from "lucide-react";
 import {
   useClips,
   useReactions,
@@ -873,32 +873,33 @@ export default function ClipRanking() {
   }
 
   // 期間指定欄はボタン1つに畳み、押したときだけ選択肢を開く。外側クリックで閉じる。
-  const [periodPickerOpen, setPeriodPickerOpen] = useState(false);
-  const periodPickerRef = useRef(null);
+  // 期間・並び替え・ゲーム・配信者タグの4つの絞り込みを「フィルター」という1つのボタンに
+  // 統合したパネル（2026-09-04、「3つのドロップダウンを1つに結合してほしい」という要望への
+  // 対応）。以前は期間だけがこの「ボタン→パネル」形式で、並び替え/ゲームは常時表示の
+  // 別々のセレクトだった。パネルは複数のセクションを持つため、期間タブを選んでも
+  // 自動では閉じない（並び替え・ゲームも続けて調整できるように、外側クリックか
+  // ボタン再クリックでのみ閉じる）。
+  const [filterOpen, setFilterOpen] = useState(false);
+  const filterRef = useRef(null);
 
   useEffect(() => {
-    if (!periodPickerOpen) return;
+    if (!filterOpen) return;
     function handleClickOutside(e) {
-      if (periodPickerRef.current && !periodPickerRef.current.contains(e.target)) {
-        setPeriodPickerOpen(false);
+      if (filterRef.current && !filterRef.current.contains(e.target)) {
+        setFilterOpen(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [periodPickerOpen]);
+  }, [filterOpen]);
 
   function handlePeriodSelect(value) {
     setPeriod(value);
-    if (value !== "day") setPeriodPickerOpen(false);
   }
 
   function handleDaySelect(d) {
     setSelectedDay(d);
-    setPeriodPickerOpen(false);
   }
-
-  const periodButtonLabel =
-    period === "day" ? formatDayLabel(selectedDay) : PERIOD_TABS.find((t) => t.value === period)?.label ?? "";
 
   const { results: broadcasterResults, searching: broadcasterSearching } = useBroadcasterSearch(searchQuery);
   const { request: requestBroadcaster, submitting: requesting, result: requestResult } = useBroadcasterRequest();
@@ -1092,24 +1093,25 @@ export default function ClipRanking() {
         {activeView === "ranking" ? (
           <>
             <div className="cv-ranking-controls" style={styles.rankingControlsRow}>
-              <div ref={periodPickerRef} style={styles.periodPickerWrap}>
+              <div ref={filterRef} style={styles.periodPickerWrap}>
                 <button
-                  onClick={() => setPeriodPickerOpen((o) => !o)}
+                  onClick={() => setFilterOpen((o) => !o)}
                   style={styles.periodPickerBtn}
-                  aria-expanded={periodPickerOpen}
+                  aria-expanded={filterOpen}
                 >
-                  <Calendar size={13} />
-                  {periodButtonLabel}
+                  <SlidersHorizontal size={13} />
+                  フィルター
                   <ChevronDown
                     size={13}
                     style={{
-                      transform: periodPickerOpen ? "rotate(180deg)" : "none",
+                      transform: filterOpen ? "rotate(180deg)" : "none",
                       transition: "transform 0.15s ease",
                     }}
                   />
                 </button>
-                {periodPickerOpen && (
+                {filterOpen && (
                   <div className="cv-fade-in" style={styles.periodPickerPanel}>
+                    <p style={styles.filterSectionLabel}>期間</p>
                     <div style={styles.periodPickerTabs}>
                       {PERIOD_TABS.map((t) => (
                         <button
@@ -1134,51 +1136,56 @@ export default function ClipRanking() {
                         ))}
                       </div>
                     )}
+
+                    <p style={styles.filterSectionLabel}>並び替え</p>
+                    <div style={styles.periodPickerTabs}>
+                      {SORT_OPTIONS.map((o) => (
+                        <button
+                          key={o.value}
+                          onClick={() => setSortBy(o.value)}
+                          style={sortBy === o.value ? styles.tabActive : styles.tab}
+                        >
+                          {o.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <p style={styles.filterSectionLabel}>ゲーム</p>
+                    <select
+                      value={gameFilter}
+                      onChange={(e) => setGameFilter(e.target.value)}
+                      style={styles.filterSelect}
+                      aria-label="ゲームで絞り込み"
+                    >
+                      <option value="">すべてのゲーム</option>
+                      {topGames.map((g) => (
+                        <option key={g.game} value={g.game}>
+                          {g.game}
+                        </option>
+                      ))}
+                    </select>
+
+                    {myTags.length > 0 && (
+                      <>
+                        <p style={styles.filterSectionLabel}>配信者タグ</p>
+                        <select
+                          value={tagFilter}
+                          onChange={(e) => setTagFilter(e.target.value)}
+                          style={styles.filterSelect}
+                          aria-label="マイタグで絞り込み"
+                        >
+                          <option value="">すべての配信者</option>
+                          {myTags.map((t) => (
+                            <option key={t} value={t}>
+                              「{t}」タグのみ
+                            </option>
+                          ))}
+                        </select>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                style={styles.sortSelect}
-                aria-label="並び替え"
-              >
-                {SORT_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-              {myTags.length > 0 && (
-                <select
-                  value={tagFilter}
-                  onChange={(e) => setTagFilter(e.target.value)}
-                  style={styles.sortSelect}
-                  aria-label="マイタグで絞り込み"
-                >
-                  <option value="">すべての配信者</option>
-                  {myTags.map((t) => (
-                    <option key={t} value={t}>
-                      「{t}」タグのみ
-                    </option>
-                  ))}
-                </select>
-              )}
-              {topGames.length > 0 && (
-                <select
-                  value={gameFilter}
-                  onChange={(e) => setGameFilter(e.target.value)}
-                  style={styles.sortSelect}
-                  aria-label="ゲームで絞り込み"
-                >
-                  <option value="">すべてのゲーム</option>
-                  {topGames.map((g) => (
-                    <option key={g.game} value={g.game}>
-                      {g.game}
-                    </option>
-                  ))}
-                </select>
-              )}
             </div>
 
             {clipsError && <div style={styles.errorBanner}>{clipsError}</div>}
@@ -1423,19 +1430,10 @@ const styles = {
     fontSize: 13,
     fontWeight: 500,
   },
-  // 右側に何もない帯状の余白が目立つという指摘への対応（2026-09-04）。週間クリップ職人
-  // ランキングと同じカード風の背景・枠線を付け、右側の空きも「コントロール行という
-  // ひとつの箱の一部」として見えるようにした（左寄せの配置自体は維持）。
   rankingControlsRow: {
     display: "flex",
     alignItems: "center",
-    justifyContent: "flex-start",
-    flexWrap: "wrap",
     gap: 10,
-    background: "#1C1C26",
-    border: "1px solid #24242F",
-    borderRadius: 10,
-    padding: "10px 16px",
     marginBottom: 16,
   },
   sortSelect: {
@@ -1494,7 +1492,7 @@ const styles = {
     borderRadius: 10,
     padding: 12,
     boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
-    minWidth: 240,
+    minWidth: 280,
   },
   periodPickerTabs: { display: "flex", flexWrap: "wrap", gap: 6 },
   periodPickerDays: {
@@ -1504,6 +1502,24 @@ const styles = {
     marginTop: 10,
     paddingTop: 10,
     borderTop: "1px solid #24242F",
+  },
+  // 「フィルター」パネル内の各項目（期間・並び替え・ゲーム・配信者タグ）の見出し
+  // （2026-09-04、3つの独立したドロップダウンを1つのフィルターパネルに統合した際に追加）。
+  filterSectionLabel: {
+    fontSize: 11.5,
+    color: "#6B6B78",
+    fontWeight: 600,
+    margin: "14px 0 6px",
+  },
+  filterSelect: {
+    display: "block",
+    width: "100%",
+    background: "#20202B",
+    border: "1px solid #2E2E3A",
+    color: "#C4C4D0",
+    borderRadius: 8,
+    padding: "7px 10px",
+    fontSize: 12.5,
   },
   activityTicker: {
     display: "flex",
