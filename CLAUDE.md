@@ -1451,16 +1451,30 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   OAuth/メール確認からの復帰処理は`useAuthConfirmationCallback`に共通化した
   （`RegisterPage.jsx`が過去に踏んだ「`refreshSession()`を保険で呼んだらTOKEN_REFRESHED
   無限ループになった」というバグの教訓を、2箇所以上に手書きで複製して再発させないため）。
-  **実機未検証（Twitch Developer Console・Supabaseダッシュボード側の設定がユーザー作業待ちのため）**:
-  `auth.identities.identity_data`の実際のJSONキー名（ログイン名/表示名側、`provider_id`列
-  自体は確実）。実際にTwitchでログインした後、`select identity_data from auth.identities
-  where provider='twitch' order by created_at desc limit 1`で確認し、必要なら
-  `register_member()`のcoalesce部分を追従修正すること。
-  **判明した追加の前提設定**: Supabaseダッシュボードで単にTwitchプロバイダを有効化するだけでは
-  不十分で、`linkIdentity()`は「Manual Linking」という認証設定が別途有効化されていないと
-  `"Manual linking is disabled"`エラーになることをlocalhostでの動作確認で確認した
-  （Authentication側の設定、プロバイダ有効化とは別項目）。ユーザーへの外部設定依頼に
-  この項目を追加済み。
+  **実機検証済み（2026-09-04）**: `auth.identities.identity_data`の実際のJSONキーは
+  `provider_id`（数値ID、想定通り）・`sub`（同じ値）・`email`・`name`（例:
+  `"kyamihei"`、ログイン名寄り）・`nickname`（例: `"きゃみへい"`、Twitch上の日本語表示名寄り）・
+  `full_name`（`name`と同じ値が入る）・`picture`/`avatar_url`・`custom_claims`
+  （`broadcaster_type`等）だった。`preferred_username`/`user_name`キーは**存在しない**。
+  現状の`register_member()`の`coalesce`（`twitch_login`は`preferred_username→nickname→
+  user_name`の順、`twitch_display_name`は`full_name→name`の順）は、実際には
+  `twitch_login`＝`nickname`の値（日本語表示名）、`twitch_display_name`＝`full_name`
+  ＝`name`の値（ログイン名寄り）に落ち着く。マイページでは`twitchDisplayName ||
+  twitchLogin`を表示に使っているため実害はない（`kyamihei と連携済みです`のように表示され、
+  意味的には妥当）が、命名と実データの対応がねじれている点は留意。
+  **判明した追加の前提設定（2つとも本番で有効化・検証済み）**:
+  (1) Supabaseダッシュボードで単にTwitchプロバイダを有効化するだけでは不十分で、
+  `linkIdentity()`は「Sign In / Providers → Allow manual linking」という設定
+  （プロバイダ有効化とは別項目）が別途有効化されていないと`"Manual linking is disabled"`
+  エラーになる。
+  (2) **`members`テーブルの行を消しても`auth.users`の本体（メール+パスワードで登録した
+  permanentアカウント）は残るため、同じメールアドレスを持つTwitchアカウントで別セッションから
+  `linkIdentity()`しようとすると、Supabase Auth側の重複メール防止機構により
+  `400: A user with this email address has already been registered`で失敗する**。
+  「会員情報を一度リセットしたい」場合は`members`テーブルの行だけでなく、対応する
+  `auth.users`のpermanentアカウントも`supabase.auth.admin.deleteUser()`
+  （Admin API、生SQLでの`auth.users`直接UPDATE/DELETEは自動モードでブロックされるため
+  Node script経由で実行）で削除しないと、この衝突が再発する。
 - **RegisterPage.jsx**: Twitchログインを画面最上部の主要CTAにし、既存のメール/パスワード
   registration/login UIは「メールアドレスでも登録できます」の下に折りたたんで残した
   （`showEmailFlow`ステート）。
@@ -1485,10 +1499,13 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   不要なため一貫性を優先）。`CommentSidebar`は`nameDraft`と同様、`nickname`も親の
   `ClipRanking`から`useMembership()`経由でpropsとして受け取る設計にした（同じフックを
   親子で別々に呼ぶと状態が分裂するという既知の落とし穴を避けるため）。
-- **未実施（ユーザー側の外部設定待ち）**: Twitch Developer ConsoleでのOAuth Redirect URL
-  追加、Supabaseダッシュボードでのプロバイダ有効化＋Manual Linking有効化、Redirect URLs
-  への`/mypage`追加。完了後、実際のTwitchログインで上記の要検証項目を確認し、必要なら
-  追従マイグレーションを当てること。
+- **本番で実機確認済み（2026-09-04）**: Twitch Developer ConsoleのOAuth Redirect URL・
+  SupabaseのTwitchプロバイダ有効化＋Manual Linking有効化・Redirect URLsへの`/mypage`追加、
+  すべて完了。実際にTwitchでログイン→会員番号#1発行→マイページでのTwitch連携表示・
+  ニックネーム保存→総合スレでの「ニックネームで投稿/匿名で投稿」切り替え→`#1`バッジ表示、
+  一連の流れを本番（kurisure.jp）で確認できた。クリップ職人バッジは、テストに使った
+  Twitchアカウントがクリップ職人として未登録のため無効状態（想定通りの正しい挙動）で、
+  実際の作成者アカウントでの確認は別途必要。
 
 # ステアリング
 
