@@ -1503,3 +1503,148 @@ select cron.schedule(
 alter table daily_ranking_posts alter column clip_id drop not null;
 alter table daily_ranking_posts add column if not exists post_type text not null default 'ranking'
   check (post_type in ('ranking', 'clipper_spotlight', 'feature_intro'));
+
+-- ============================================================
+-- 会員登録（membersテーブル）。2026-09-04追加。
+-- 「早めに登録した人は会員番号でわかる」という要望から、匿名→本登録（メール確認済み、
+-- またはTwitchログイン）に移行したユーザーへ連番の会員番号を発行する。
+-- （注: このブロックはこれまでschema.sqlへの反映が漏れていたため、今回まとめて追記した。
+-- 本番への実適用は各マイグレーションファイル経由で既に完了済み。）
+-- ============================================================
+
+create table if not exists members (
+  id uuid primary key references auth.users(id) on delete cascade,
+  member_number integer generated always as identity,
+  registered_at timestamptz not null default now(),
+  -- Twitchログイン・ニックネーム・クリップ職人バッジ機能で追加（2026-09-04）。
+  twitch_user_id text,
+  twitch_login text,
+  twitch_display_name text,
+  nickname text,
+  clipper_badge_enabled boolean not null default false
+);
+
+create unique index if not exists idx_members_member_number on members(member_number);
+create unique index if not exists idx_members_twitch_user_id
+  on members(twitch_user_id) where twitch_user_id is not null;
+
+alter table members enable row level security;
+
+-- 自分の会員情報だけ閲覧可。他人の番号はget_comment_member_numbers経由でのみ間接的に見える
+-- （comments.anon_idをクライアントへ直接晒さない方針）。
+drop policy if exists "members_select_own" on members;
+create policy "members_select_own" on members
+  for select using (id = auth.uid());
+
+-- INSERT/UPDATE/DELETEのポリシーは意図的に用意しない（ポリシー無し＝拒否）。
+-- 書き込みはすべてsecurity definer RPC経由に限定する。
+
+-- 匿名から本登録（メール確認済み、またはTwitchログイン連携）に移行したユーザーが呼ぶと
+-- 会員番号を新規発行する。既に登録済みなら何もせず既存の番号を返す（冪等）。
+-- is_anonymousはJWTクレームではなくauth.users列を直接見る（JWTの古さによる誤判定を防ぐ、
+-- 2026-09-04に一度実際に踏んだバグの修正）。
+-- Twitchでログイン/連携済みの場合、auth.identities（サーバー側の信頼できる情報源、
+-- クライアントからは偽装不可）からTwitch識別情報を読み取りmembersへ同期する。
+create or replace function register_member()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_is_anonymous boolean;
+  v_number integer;
+  v_twitch_user_id text;
+  v_twitch_login text;
+  v_twitch_display_name text;
+begin
+  select is_anonymous into v_is_anonymous from auth.users where id = auth.uid();
+  if v_is_anonymous is distinct from false then
+    raise exception 'メール確認またはTwitch連携が完了してから登録してください';
+  end if;
+
+  insert into members (id) values (auth.uid())
+  on conflict (id) do nothing;
+
+  select provider_id,
+         coalesce(identity_data->>'preferred_username', identity_data->>'nickname', identity_data->>'user_name'),
+         coalesce(identity_data->>'full_name', identity_data->>'name')
+    into v_twitch_user_id, v_twitch_login, v_twitch_display_name
+  from auth.identities
+  where user_id = auth.uid() and provider = 'twitch'
+  order by created_at desc
+  limit 1;
+
+  if v_twitch_user_id is not null then
+    update members
+    set twitch_user_id = v_twitch_user_id,
+        twitch_login = coalesce(v_twitch_login, twitch_login),
+        twitch_display_name = coalesce(v_twitch_display_name, twitch_display_name)
+    where id = auth.uid();
+  end if;
+
+  select member_number into v_number from members where id = auth.uid();
+  return v_number;
+end;
+$$;
+
+-- ニックネーム設定（2026-09-04追加）。
+create or replace function set_nickname(p_nickname text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_trimmed text := trim(coalesce(p_nickname, ''));
+begin
+  if not exists (select 1 from members where id = auth.uid()) then
+    raise exception '会員登録が完了していません';
+  end if;
+  if char_length(v_trimmed) > 20 then
+    raise exception 'ニックネームは20文字以内で入力してください';
+  end if;
+  update members set nickname = nullif(v_trimmed, '') where id = auth.uid();
+end;
+$$;
+
+-- クリップ職人バッジの着脱（2026-09-04追加）。「ランキングに一度でも載っていれば対象」という
+-- 緩い基準のため、top_clippers_mv（全creator_idをgroup byしているだけでLIMIT無し）に
+-- 行があるかどうかで判定する。有効化はクライアントを信用せずサーバー側で毎回再検証する。
+create or replace function set_clipper_badge_enabled(p_enabled boolean)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_twitch_user_id text;
+begin
+  select twitch_user_id into v_twitch_user_id from members where id = auth.uid();
+  if p_enabled then
+    if v_twitch_user_id is null then
+      raise exception 'Twitchアカウントを連携してください';
+    end if;
+    if not exists (select 1 from top_clippers_mv where creator_id = v_twitch_user_id) then
+      raise exception 'クリップ職人ランキングに登録がありません';
+    end if;
+  end if;
+  update members set clipper_badge_enabled = p_enabled where id = auth.uid();
+end;
+$$;
+
+-- コメント欄の会員番号バッジ・クリップ職人バッジ表示用（2026-09-04、クリップ職人バッジ列を追加）。
+-- comments.anon_idを直接公開せず、security definerで会員番号とバッジ状態だけを返す。
+drop function if exists get_comment_member_numbers(uuid[]);
+create or replace function get_comment_member_numbers(comment_ids uuid[])
+returns table(comment_id uuid, member_number integer, clipper_badge boolean)
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select c.id as comment_id, m.member_number, coalesce(m.clipper_badge_enabled, false)
+  from comments c
+  join members m on m.id = c.anon_id
+  where c.id = any(comment_ids);
+$$;
