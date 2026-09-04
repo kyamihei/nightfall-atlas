@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
-  Users, Scissors, Search, MessageSquare, Hash, ListChecks, Smile, Star, Award, LogOut, UserPlus, ExternalLink,
+  Users, Scissors, Search, MessageSquare, Hash, ListChecks, Smile, Star, Award, LogOut, UserPlus, ExternalLink, HelpCircle,
 } from "lucide-react";
 import { supabase } from "../lib/supabase-client";
 import { useMembership } from "../lib/use-clip-ranking";
@@ -90,6 +90,10 @@ export default function Header() {
         </Link>
 
         <nav className="cv-nav-links" style={styles.headerLinks}>
+          <Link to="/guide" className="cv-nav-link" style={styles.navLink}>
+            <HelpCircle size={15} />
+            サイトの使い方
+          </Link>
           <Link to="/broadcasters" className="cv-nav-link" style={styles.navLink}>
             <Users size={15} />
             配信者一覧
