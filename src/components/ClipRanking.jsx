@@ -743,7 +743,7 @@ export default function ClipRanking() {
     tagStreamerFilter,
     gameFilter || null,
   );
-  const { clips: trendingClips, loading: trendingLoading } = useTrendingClips(5, 72);
+  const { clips: trendingClips, loading: trendingLoading } = useTrendingClips(PAGE_SIZE, 72);
   const { items: activityItems } = useActivityFeed(15);
 
   // お知らせフィード（ライブ活動フィード）の表示設定。「指定したタグの新着クリップだけ知りたい」
@@ -1301,7 +1301,7 @@ export default function ClipRanking() {
           <div className="cv-clip-list" style={styles.list}>
             {trendingLoading && (
               <>
-                {Array.from({ length: 5 }).map((_, i) => (
+                {Array.from({ length: PAGE_SIZE }).map((_, i) => (
                   <SkeletonRow key={i} delay={i * 40} />
                 ))}
               </>
@@ -1423,12 +1423,19 @@ const styles = {
     fontSize: 13,
     fontWeight: 500,
   },
+  // 右側に何もない帯状の余白が目立つという指摘への対応（2026-09-04）。週間クリップ職人
+  // ランキングと同じカード風の背景・枠線を付け、右側の空きも「コントロール行という
+  // ひとつの箱の一部」として見えるようにした（左寄せの配置自体は維持）。
   rankingControlsRow: {
     display: "flex",
     alignItems: "center",
     justifyContent: "flex-start",
     flexWrap: "wrap",
     gap: 10,
+    background: "#1C1C26",
+    border: "1px solid #24242F",
+    borderRadius: 10,
+    padding: "10px 16px",
     marginBottom: 16,
   },
   sortSelect: {
