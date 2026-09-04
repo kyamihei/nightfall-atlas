@@ -41,8 +41,6 @@ export default function RegisterPage() {
   // このページ（/register）へ戻ってくるように送るため、リンクを踏んだ直後の再訪問もここで拾える。
   useEffect(() => {
     let cancelled = false;
-    const instanceId = Math.random().toString(36).slice(2, 8);
-    console.log("[cv-debug] effect mounted, instanceId=" + instanceId);
 
     // メール確認リンクを踏んで戻ってきた直後のURLを処理する。PKCEフロー（?code=...）の場合、
     // supabase-jsのdetectSessionInUrl（既定true）が自動で交換してくれるはずだが、
@@ -50,10 +48,7 @@ export default function RegisterPage() {
     // 明示的にexchangeCodeForSessionを呼んでおく（二重に呼んでも実害はない）。
     // また、リンクが期限切れ/既に使用済み等で失敗した場合はSupabaseが
     // ?error=...&error_description=...を付けて返してくるため、ここで検知してユーザーに
-    // 表示する（検知しないと「何も起きず入力画面に戻る」という分かりにくい状態になる。
-    // 実際にユーザーが「メールアドレス入力画面に戻ってしまう」と報告した不具合の原因が
-    // これだった可能性が高い。例えば同じメールで確認を2回リクエストした場合、古い方の
-    // リンクは無効化され、それを踏むとこのエラーになる）。
+    // 表示する（検知しないと「何も起きず入力画面に戻る」という分かりにくい状態になる）。
     async function handleUrlParams() {
       const url = new URL(window.location.href);
       const errorDescription = url.searchParams.get("error_description");
@@ -77,40 +72,31 @@ export default function RegisterPage() {
       }
     }
 
-    async function checkConfirmed(source) {
-      console.log("[cv-debug][" + instanceId + "] checkConfirmed start, source=" + source + ", cancelled=" + cancelled);
+    async function checkConfirmed() {
       await handleUrlParams();
-      if (cancelled) {
-        console.log("[cv-debug][" + instanceId + "] bail after handleUrlParams, cancelled=true");
-        return;
-      }
+      if (cancelled) return;
       await ensureAnonymousSession();
       const { data } = await supabase.auth.getUser();
-      console.log("[cv-debug][" + instanceId + "] getUser email=" + data.user?.email + " is_anonymous=" + data.user?.is_anonymous + " cancelled=" + cancelled);
       if (cancelled || !data.user) return;
       if (data.user.email && data.user.is_anonymous === false) {
-        try {
-          await supabase.auth.refreshSession();
-        } catch {
-          // 更新に失敗しても致命的ではない（後続のRPC呼び出し自体が正しく判定する）
-        }
-        console.log("[cv-debug][" + instanceId + "] about to setEmailConfirmed(true), cancelled=" + cancelled);
-        if (cancelled) {
-          console.log("[cv-debug][" + instanceId + "] bail before setEmailConfirmed, cancelled=true");
-          return;
-        }
         setEmailConfirmed(true);
         setEmail(data.user.email);
-        console.log("[cv-debug][" + instanceId + "] setEmailConfirmed(true) called");
       }
     }
-    checkConfirmed("initial-call");
+    checkConfirmed();
+    // is_anonymousの判定はauth.usersの実データを見るregister_member() RPC側で行うため、
+    // ここでrefreshSession()を呼んでトークンを強制更新する必要はない（2026-09-04に一度
+    // 「保険」として追加したが、これ自体がTOKEN_REFRESHEDイベントを発生させ、そのイベントで
+    // またcheckConfirmed→refreshSessionが呼ばれる無限ループを引き起こす実害の方が大きい
+    // バグだったため削除した。実際に本番で秒間何十回もトークン更新が走り続ける状態を
+    // 直接確認して特定・修正した）。
+    // SIGNED_INとUSER_UPDATEDだけ拾えば十分（メール確認直後の同一タブでの反映、
+    // ログインタブからのサインイン、いずれもこのどちらかで拾える）。TOKEN_REFRESHEDや
+    // INITIAL_SESSION等の無関係なイベントでは再チェックしない。
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-      console.log("[cv-debug][" + instanceId + "] onAuthStateChange event=" + event);
-      checkConfirmed("auth-state-change:" + event);
+      if (event === "SIGNED_IN" || event === "USER_UPDATED") checkConfirmed();
     });
     return () => {
-      console.log("[cv-debug][" + instanceId + "] EFFECT CLEANUP (unmount or deps changed) - setting cancelled=true");
       cancelled = true;
       sub.subscription.unsubscribe();
     };
@@ -198,11 +184,6 @@ export default function RegisterPage() {
     setLoginSubmitting(false);
     await refreshMembership();
   }
-
-  console.log(
-    "[cv-debug] render membershipLoading=" + membershipLoading + " memberNumber=" + memberNumber +
-      " emailConfirmed=" + emailConfirmed + " emailSent=" + emailSent + " mode=" + mode,
-  );
 
   return (
     <div style={styles.page}>
