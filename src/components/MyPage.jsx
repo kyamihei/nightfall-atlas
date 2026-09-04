@@ -63,7 +63,7 @@ export default function MyPage() {
 
   useAuthConfirmationCallback(async (user, { error: confirmError }) => {
     if (confirmError) {
-      setTwitchError(`確認に失敗しました: ${confirmError}`);
+      setTwitchError(twitchErrorMessage({ message: confirmError }));
       return;
     }
     if (!user) return;

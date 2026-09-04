@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ArrowLeft, Award, Loader2, LogIn, Mail, Radio, UserPlus } from "lucide-react";
 import { supabase } from "../lib/supabase-client";
 import { useMembership } from "../lib/use-clip-ranking";
-import { useAuthConfirmationCallback, linkTwitchIdentity } from "../lib/use-auth-callback";
+import { useAuthConfirmationCallback, linkTwitchIdentity, signInWithTwitch } from "../lib/use-auth-callback";
 import { useSmartBack } from "../lib/use-smart-back";
 import Footer from "./Footer";
 import BackgroundGlow from "./BackgroundGlow";
@@ -61,30 +61,50 @@ export default function RegisterPage() {
   const [twitchSubmitting, setTwitchSubmitting] = useState(false);
   const [twitchError, setTwitchError] = useState("");
 
-  useAuthConfirmationCallback(async (user, { error: confirmError }) => {
-    if (confirmError) {
-      setError(`確認に失敗しました: ${confirmError}`);
-      return;
-    }
-    if (!user) return;
-
-    const hasTwitch = (user.identities ?? []).some((i) => i.provider === "twitch");
-    if (hasTwitch) {
-      // Twitch連携完了時点で既に本登録済み（パスワード設定は不要）なので、そのまま会員登録を確定する
-      const { error: rpcError } = await supabase.rpc("register_member");
-      if (rpcError) {
-        setTwitchError(rpcError.message || "会員登録の確定に失敗しました。時間をおいて再度お試しください。");
+  useAuthConfirmationCallback(
+    async (user, { error: confirmError }) => {
+      if (confirmError) {
+        // showEmailFlowが閉じたままだとメールフォーム内のerrorTextが表示されず「何も
+        // 起きていないように見える」状態になるため、開閉状態に依存しないtwitchErrorへ出す
+        // （Twitch起因以外の確認エラーもここに表示されるが、無言で消えるよりは良い）。
+        setTwitchError(twitchErrorMessage({ message: confirmError }));
         return;
       }
-      await refreshMembership();
-      return;
-    }
+      if (!user) return;
 
-    if (user.email) {
-      setEmailConfirmed(true);
-      setEmail(user.email);
-    }
-  });
+      const hasTwitch = (user.identities ?? []).some((i) => i.provider === "twitch");
+      if (hasTwitch) {
+        // Twitch連携完了時点で既に本登録済み（パスワード設定は不要）なので、そのまま会員登録を確定する
+        const { error: rpcError } = await supabase.rpc("register_member");
+        if (rpcError) {
+          setTwitchError(rpcError.message || "会員登録の確定に失敗しました。時間をおいて再度お試しください。");
+          return;
+        }
+        await refreshMembership();
+        return;
+      }
+
+      if (user.email) {
+        setEmailConfirmed(true);
+        setEmail(user.email);
+      }
+    },
+    // ログアウト後に同じTwitchアカウントで再度「Twitchでログイン」した場合、linkIdentityは
+    // 「既に別ユーザーに連携済み」で失敗する（新しい匿名セッションへの連携試行になるため）。
+    // これはユーザーから見れば単なる「再ログイン」なので、通常ログイン（signInWithOAuth）へ
+    // 自動的にフォールバックし、以前の本登録済みアカウントへそのままログインさせる
+    // （詳細はuse-auth-callback.jsのuseAuthConfirmationCallbackコメント参照）。
+    async () => {
+      setTwitchError("");
+      setTwitchSubmitting(true);
+      const { error: signInError } = await signInWithTwitch(`${window.location.origin}${REGISTER_PATH}`);
+      if (signInError) {
+        setTwitchSubmitting(false);
+        setTwitchError(twitchErrorMessage(signInError));
+      }
+      // 成功時はTwitchの認可画面へ（既に認可済みのため実質即座に）リダイレクトされる
+    },
+  );
 
   async function handleTwitchLogin() {
     setTwitchError("");
