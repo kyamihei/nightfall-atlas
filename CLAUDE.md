@@ -1170,6 +1170,16 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
     Vaultに保管されており本セッションでは取得していないため、UI経由の削除操作自体は
     未検証（`admin_delete_member`は1行の`delete`文のみで既存パターンの流用のため
     リスクは低いと判断）。
+  - **ハマった点（ユーザー報告・即日修正）**: 実際に管理画面を開いたところ
+    「structure of query does not match function result type」エラーが発生した。
+    原因は`auth.users.email`の実際の型が`character varying`（varchar）で、
+    `admin_get_members`が`email text`として宣言していたこと。`RETURNS TABLE`の
+    `return query`は列の型が宣言と完全一致している必要があり、varcharとtextの違いだけでも
+    このエラーになる。`u.email::text`で明示的にキャストして解決
+    （`supabase/migrations/20260904030000_fix_admin_get_members_email_type.sql`）。
+    本番へ直接同じクエリを実行して解決を確認済み。**今後auth.usersの列（email等）を
+    RETURNS TABLE関数で返す際は、varchar/textの型不一致に注意すること**
+    （`information_schema.columns`で実際の型を確認してから宣言するのが安全）。
 
 # ステアリング
 
