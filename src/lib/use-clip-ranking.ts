@@ -597,11 +597,17 @@ export function useComments(clipId: string) {
  */
 export function useMembership() {
   const [memberNumber, setMemberNumber] = useState<number | null>(null);
+  // 匿名セッションかどうか（＝メール+パスワードでログイン済みの本登録アカウントかどうか）。
+  // ヘッダーの「会員登録」リンクを、既にログイン中のユーザーには出さないようにする判定に使う
+  // （ログイン中に「新規登録」フォームへ入ると、既存メールの変更フローに入ってしまい
+  // 混乱を招く不具合が実際に発生したため、2026-09-04追加）。
+  const [isAnonymous, setIsAnonymous] = useState(true);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     const user = await ensureAnonymousSession();
+    setIsAnonymous(user.is_anonymous ?? true);
     const { data } = await supabase.from("members").select("member_number").eq("id", user.id).maybeSingle();
     setMemberNumber(data?.member_number ?? null);
     setLoading(false);
@@ -611,7 +617,7 @@ export function useMembership() {
     refresh();
   }, [refresh]);
 
-  return { memberNumber, loading, refresh };
+  return { memberNumber, isAnonymous, loading, refresh };
 }
 
 /**

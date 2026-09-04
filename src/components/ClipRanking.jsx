@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, Users, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, Smile, Calendar, Play, Flame, Hash, ExternalLink, Settings, Sparkles } from "lucide-react";
+import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, Users, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, Smile, Calendar, Play, Flame, Hash, ExternalLink, Settings, Sparkles, Award, LogOut } from "lucide-react";
+import { supabase } from "../lib/supabase-client";
 import {
   useClips,
   useReactions,
@@ -19,6 +20,7 @@ import {
   useActivityFeed,
   useMyBroadcasterTags,
   useCommentMemberBadges,
+  useMembership,
 } from "../lib/use-clip-ranking";
 import { REACTIONS_ENABLED } from "../lib/feature-flags";
 import { useActivityFeedPrefs, ACTIVITY_FEED_TYPES } from "../lib/use-activity-feed-prefs";
@@ -716,6 +718,15 @@ export default function ClipRanking() {
   const [tagFilter, setTagFilter] = useState(""); // ""=絞り込みなし。自分で付けた配信者タグで絞り込む
   const { tags: myTags, streamersByTag } = useMyBroadcasterTags();
   const tagStreamerFilter = tagFilter ? streamersByTag[tagFilter] ?? [] : null;
+
+  // ヘッダーの「会員登録」リンクをログイン中のユーザーには出さない・代わりにログアウトを
+  // 出す判定用（2026-09-04追加。ログイン中に「新規登録」フォームへ入ると既存メールの変更
+  // フローに入ってしまい混乱を招く不具合が実際に発生したための対応）。
+  const { memberNumber, isAnonymous: isAnonymousSession, loading: membershipLoading } = useMembership();
+  async function handleLogout() {
+    await supabase.auth.signOut({ scope: "local" });
+    window.location.reload(); // 新しい匿名セッションで全データを作り直すのが確実なため
+  }
   const { clips, loading, error: clipsError, totalCount } = useClips(
     PAGE_SIZE,
     period,
@@ -1022,10 +1033,25 @@ export default function ClipRanking() {
               <Star size={15} />
               お気に入り
             </Link>
-            <Link to="/register" className="cv-nav-link" style={styles.navLink}>
-              <UserPlus size={15} />
-              会員登録
-            </Link>
+            {!membershipLoading && !isAnonymousSession ? (
+              <>
+                {memberNumber !== null && (
+                  <span className="cv-nav-link" style={styles.navLinkStatic}>
+                    <Award size={15} />
+                    会員 #{memberNumber}
+                  </span>
+                )}
+                <button onClick={handleLogout} className="cv-nav-link" style={styles.navLinkBtn}>
+                  <LogOut size={15} />
+                  ログアウト
+                </button>
+              </>
+            ) : (
+              <Link to="/register" className="cv-nav-link" style={styles.navLink}>
+                <UserPlus size={15} />
+                会員登録
+              </Link>
+            )}
             <a
               href="https://x.com/kurisure_info"
               target="_blank"
@@ -1470,6 +1496,33 @@ const styles = {
     fontSize: 13,
     fontWeight: 600,
     textDecoration: "none",
+    whiteSpace: "nowrap",
+  },
+  navLinkStatic: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    background: "#FF4D6D1A",
+    border: "1px solid #FF4D6D40",
+    borderRadius: 8,
+    padding: "8px 14px",
+    color: "#FF4D6D",
+    fontSize: 13,
+    fontWeight: 600,
+    whiteSpace: "nowrap",
+  },
+  navLinkBtn: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    background: "#1C1C26",
+    border: "1px solid #2E2E3A",
+    borderRadius: 8,
+    padding: "8px 14px",
+    color: "#C4C4D0",
+    fontSize: 13,
+    fontWeight: 600,
+    fontFamily: "inherit",
     whiteSpace: "nowrap",
   },
   searchBox: {
