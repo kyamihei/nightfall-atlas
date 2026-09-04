@@ -180,7 +180,7 @@ function ClipRow({
 
   return (
     <div
-      className="cv-fade-in-up"
+      className="cv-fade-in-up cv-clip-card"
       style={{
         ...styles.row,
         cursor: "pointer",
@@ -687,7 +687,7 @@ function ActivityTicker({ items }) {
         {item.type === "stamp" && (
           <>
             <span style={{ marginRight: 4 }}>{item.stamp}</span>
-            「{item.clipTitle}」にスタンプが押されました
+            「{item.clipTitle}」にリアクションが押されました
           </>
         )}
         {item.type === "new_clip" && (
@@ -1058,7 +1058,14 @@ export default function ClipRanking() {
 
         @media (min-width: 901px) {
           .cv-clip-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
-          .cv-row-main { flex-direction: column; align-items: stretch; gap: 10px; }
+          /* グリッドの同じ行にあるカードは高さが揃う（grid既定のstretch）が、タイトルや配信者名の
+             行数はカードごとに違うため、コメント/お気に入り/リアクションするボタンの行が
+             カードごとにバラバラの高さに来てしまう。cv-clip-card→cv-row-mainをflex縦積みで
+             カード全体の高さまで伸ばし、cv-row-actionsをmargin-top: autoで下端に押し付けることで
+             ボタン行を常にカード下端に揃える（2026-09-04、「下揃えにしてほしい」という要望）。 */
+          .cv-clip-card { display: flex; flex-direction: column; }
+          .cv-row-main { flex: 1; flex-direction: column; align-items: stretch; gap: 10px; }
+          .cv-row-actions { margin-top: auto; }
           .cv-thumb-wrap { display: block; position: relative; }
           .cv-clip-thumb { width: 100%; height: auto; aspect-ratio: 16 / 9; }
           .cv-clip-title { font-size: 17px; }

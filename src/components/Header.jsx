@@ -118,7 +118,7 @@ export default function Header() {
           )}
           <Link to="/my-stamps" className="cv-nav-link" style={styles.navLink}>
             <Smile size={15} />
-            スタンプ一覧
+            リアクション一覧
           </Link>
           <Link to="/favorites" className="cv-nav-link" style={styles.navLink}>
             <Star size={15} />

@@ -53,9 +53,9 @@ export default function MyStampsPage() {
       <header style={styles.header}>
         <h1 className="clip-title-font" style={styles.h1}>
           <Smile size={20} style={{ marginRight: 8, verticalAlign: -3 }} />
-          スタンプを押したクリップ
+          リアクションしたクリップ
         </h1>
-        <p style={styles.tagline}>スタンプの種類ごとに、自分が押したクリップを確認できます</p>
+        <p style={styles.tagline}>リアクションの種類ごとに、自分が押したクリップを確認できます</p>
 
         <div style={styles.tabs}>
           {REACTION_STAMPS.map((s) => (
@@ -81,7 +81,7 @@ export default function MyStampsPage() {
           {clips.length === 0 && (
             <div style={styles.emptyState}>
               <Film size={26} color="#3E3E4A" style={{ marginBottom: 10 }} />
-              <p style={{ margin: 0 }}>「{tab}」スタンプを押したクリップはまだありません。</p>
+              <p style={{ margin: 0 }}>「{tab}」でリアクションしたクリップはまだありません。</p>
             </div>
           )}
           {clips.map((clip, i) => (
