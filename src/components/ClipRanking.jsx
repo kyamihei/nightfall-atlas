@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, Search, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, Users, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, Smile, Calendar, Play, Flame, Hash, ExternalLink, Settings, Sparkles, Award, LogOut } from "lucide-react";
-import { supabase } from "../lib/supabase-client";
+import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, Calendar, Play, Flame, Settings, Sparkles } from "lucide-react";
 import {
   useClips,
   useReactions,
@@ -732,19 +731,9 @@ export default function ClipRanking() {
   const [gameFilter, setGameFilter] = useState(""); // ""=絞り込みなし
   const { games: topGames } = useTopGames(150);
 
-  // ヘッダーの「会員登録」リンクをログイン中のユーザーには出さない・代わりにログアウトを
-  // 出す判定用（2026-09-04追加。ログイン中に「新規登録」フォームへ入ると既存メールの変更
-  // フローに入ってしまい混乱を招く不具合が実際に発生したための対応）。
-  const {
-    memberNumber,
-    nickname,
-    isAnonymous: isAnonymousSession,
-    loading: membershipLoading,
-  } = useMembership();
-  async function handleLogout() {
-    await supabase.auth.signOut({ scope: "local" });
-    window.location.reload(); // 新しい匿名セッションで全データを作り直すのが確実なため
-  }
+  // コメント投稿時の「ニックネームで投稿」選択肢用（ヘッダー側の会員バッジ/ログアウト等は
+  // 共通ヘッダーHeader.jsxへ移設済み、2026-09-04）。
+  const { nickname } = useMembership();
   const { clips, loading, error: clipsError, totalCount } = useClips(
     PAGE_SIZE,
     period,
@@ -835,7 +824,6 @@ export default function ClipRanking() {
   const [activeCommentClipId, setActiveCommentClipId] = useState(null);
   const [commentsDataByClip, setCommentsDataByClip] = useState({});
   const [nameDraft, setNameDraft] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
   const [requestDraft, setRequestDraft] = useState("");
   const [reportedIds, setReportedIds] = useState(new Set());
 
@@ -847,6 +835,9 @@ export default function ClipRanking() {
   // アンマウントされると失われるため）不具合の対応（2026-09-04）。
   const VIEW_TABS = ["ranking", "trending"];
   const [searchParams, setSearchParams] = useSearchParams();
+  // 配信者名検索はヘッダー（Header.jsx）側のstateから?qクエリ経由で受け取る
+  // （ヘッダーはコンポーネントツリー上ここの親ではないためpropsで渡せない、2026-09-04）。
+  const searchQuery = searchParams.get("q") ?? "";
   const initialView = searchParams.get("view") === "trending" ? "trending" : "ranking";
   const [activeView, setActiveView] = useState(initialView);
   const [slideDir, setSlideDir] = useState("right");
@@ -972,15 +963,6 @@ export default function ClipRanking() {
         .clip-title-font { font-family: 'Oswald', sans-serif; }
         button { cursor: pointer; }
         textarea:focus, input:focus { outline: 2px solid #FF4D6D33; }
-        .cv-nav-link {
-          transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
-        }
-        .cv-nav-link:hover {
-          background: #FF4D6D14;
-          border-color: #FF4D6D55;
-          color: #EDEDF2;
-          transform: translateY(-1px);
-        }
         .cv-clip-thumb { width: 64px; height: 44px; }
         .cv-clip-title { font-size: 15px; }
         .cv-clip-title-link:hover .cv-clip-title { text-decoration: underline; }
@@ -1021,106 +1003,12 @@ export default function ClipRanking() {
           .cv-clip-list { grid-template-columns: repeat(4, 1fr); }
         }
         @media (max-width: 640px) {
-          .cv-header { flex-direction: column; align-items: flex-start; }
-          .cv-header-controls { align-items: flex-start; width: 100%; }
-          .cv-nav-links { justify-content: flex-start; }
-          .cv-search-box { width: 100%; }
           .cv-row-main { flex-wrap: wrap; row-gap: 10px; }
           .cv-row-actions { flex-basis: 100%; justify-content: flex-end; }
         }
       `}</style>
 
       <NewSiteBanner />
-
-      <header className="cv-header" style={styles.header}>
-        <div>
-          <div style={styles.eyebrowRow}>
-            <span className="cv-live-dot" style={styles.liveDot} />
-            <span style={styles.eyebrow}>Twitchクリップの掲示板</span>
-          </div>
-          <h1 style={styles.h1}>
-            <img src="/favicon.ico" alt="" style={styles.h1Icon} />
-            クリスレ
-          </h1>
-          <p style={styles.tagline}>みんなのお気に入りのクリップにコメントしてみよう！</p>
-        </div>
-        <div className="cv-header-controls" style={styles.headerControls}>
-          <div className="cv-nav-links" style={styles.headerLinks}>
-            <Link to="/broadcasters" className="cv-nav-link" style={styles.navLink}>
-              <Users size={15} />
-              配信者一覧
-            </Link>
-            <Link to="/clippers" className="cv-nav-link" style={styles.navLink}>
-              <Scissors size={15} />
-              クリップ職人
-            </Link>
-            <Link to="/search" className="cv-nav-link" style={styles.navLink}>
-              <Search size={15} />
-              クリップ検索
-            </Link>
-            <Link to="/general" className="cv-nav-link" style={styles.navLink}>
-              <MessageSquare size={15} />
-              総合スレ
-            </Link>
-            <Link to="/threads" className="cv-nav-link" style={styles.navLink}>
-              <Hash size={15} />
-              タグスレ
-            </Link>
-            {REACTIONS_ENABLED && (
-              <Link to="/my-reactions" className="cv-nav-link" style={styles.navLink}>
-                <ListChecks size={15} />
-                評価した動画
-              </Link>
-            )}
-            <Link to="/my-stamps" className="cv-nav-link" style={styles.navLink}>
-              <Smile size={15} />
-              スタンプ一覧
-            </Link>
-            <Link to="/favorites" className="cv-nav-link" style={styles.navLink}>
-              <Star size={15} />
-              お気に入り
-            </Link>
-            {!membershipLoading && !isAnonymousSession ? (
-              <>
-                {memberNumber !== null && (
-                  <Link to="/mypage" className="cv-nav-link" style={styles.navLinkStatic}>
-                    <Award size={15} />
-                    会員 #{memberNumber}
-                  </Link>
-                )}
-                <button onClick={handleLogout} className="cv-nav-link" style={styles.navLinkBtn}>
-                  <LogOut size={15} />
-                  ログアウト
-                </button>
-              </>
-            ) : (
-              <Link to="/register" className="cv-nav-link" style={styles.navLink}>
-                <UserPlus size={15} />
-                会員登録
-              </Link>
-            )}
-            <a
-              href="https://x.com/kurisure_info"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="cv-nav-link"
-              style={{ ...styles.navLink, color: "#AFA9EC", borderColor: "#3D3766" }}
-            >
-              <ExternalLink size={15} />
-              Xでフォロー
-            </a>
-          </div>
-          <div className="cv-search-box" style={styles.searchBox}>
-            <Search size={14} color="#6B6B78" />
-            <input
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="配信者名で検索…"
-              style={styles.searchInput}
-            />
-          </div>
-        </div>
-      </header>
 
       <div style={styles.activityBarRow}>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -1518,98 +1406,6 @@ const styles = {
     color: "#9797A6",
     padding: 4,
   },
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-end",
-    flexWrap: "wrap",
-    gap: 16,
-    borderBottom: "1px solid #24242F",
-    paddingBottom: 20,
-    marginBottom: 20,
-  },
-  headerControls: { display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 10 },
-  headerLinks: { display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end" },
-  navLink: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 6,
-    background: "#1C1C26",
-    border: "1px solid #2E2E3A",
-    borderRadius: 8,
-    padding: "8px 14px",
-    color: "#C4C4D0",
-    fontSize: 13,
-    fontWeight: 600,
-    textDecoration: "none",
-    whiteSpace: "nowrap",
-  },
-  navLinkStatic: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 6,
-    background: "#FF4D6D1A",
-    border: "1px solid #FF4D6D40",
-    borderRadius: 8,
-    padding: "8px 14px",
-    color: "#FF4D6D",
-    fontSize: 13,
-    fontWeight: 600,
-    whiteSpace: "nowrap",
-  },
-  navLinkBtn: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 6,
-    background: "#1C1C26",
-    border: "1px solid #2E2E3A",
-    borderRadius: 8,
-    padding: "8px 14px",
-    color: "#C4C4D0",
-    fontSize: 13,
-    fontWeight: 600,
-    fontFamily: "inherit",
-    whiteSpace: "nowrap",
-  },
-  searchBox: {
-    display: "flex",
-    alignItems: "center",
-    gap: 6,
-    background: "#1C1C26",
-    border: "1px solid #2E2E3A",
-    borderRadius: 8,
-    padding: "6px 10px",
-    width: 220,
-  },
-  searchInput: {
-    background: "transparent",
-    border: "none",
-    outline: "none",
-    color: "#EDEDF2",
-    fontSize: 13,
-    width: "100%",
-  },
-  eyebrowRow: { display: "flex", alignItems: "center", gap: 8, marginBottom: 6 },
-  liveDot: {
-    width: 7,
-    height: 7,
-    borderRadius: "50%",
-    background: "#FF4D6D",
-    display: "inline-block",
-  },
-  eyebrow: { fontSize: 12, color: "#9797A6", letterSpacing: 0.3 },
-  h1: {
-    fontFamily: "'RocknRoll One', sans-serif",
-    fontSize: 32,
-    fontWeight: 400,
-    margin: "0 0 6px",
-    letterSpacing: 0.5,
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-  },
-  h1Icon: { width: 30, height: 30, borderRadius: 6, flexShrink: 0 },
-  tagline: { fontSize: 13, color: "#6B6B78", margin: 0 },
   tab: {
     background: "transparent",
     border: "1px solid #2E2E3A",
@@ -1630,7 +1426,7 @@ const styles = {
   rankingControlsRow: {
     display: "flex",
     alignItems: "center",
-    justifyContent: "space-between",
+    justifyContent: "flex-start",
     flexWrap: "wrap",
     gap: 10,
     marginBottom: 16,
