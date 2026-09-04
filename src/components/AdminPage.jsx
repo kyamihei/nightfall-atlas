@@ -262,6 +262,24 @@ function DashboardPanel({ password }) {
           </div>
         ))}
       </Section>
+
+      <Section icon={Trash2} title="クリップの自動整理（低視聴回数の削除）">
+        <div style={styles.statGrid}>
+          <StatCard icon={Trash2} label="累計削除件数" value={data.cleanup?.total_deleted ?? 0} />
+        </div>
+        <p style={styles.metaLine}>
+          作成から14日を過ぎ、視聴回数が50回未満のクリップを毎日自動削除（DB容量削減のため）
+        </p>
+        {(data.cleanup?.recent_runs ?? []).length === 0 && <p style={styles.emptyText}>まだ実行履歴がありません</p>}
+        {(data.cleanup?.recent_runs ?? []).map((r, i) => (
+          <div key={i} style={styles.rankRow}>
+            <span style={styles.rankLabel}>{formatNumber(r.deleted_count)}件削除</span>
+            <span style={styles.rankValue}>
+              猶予{r.grace_period_days}日・{r.view_threshold}回未満・{timeAgo(r.run_at)}
+            </span>
+          </div>
+        ))}
+      </Section>
     </div>
   );
 }

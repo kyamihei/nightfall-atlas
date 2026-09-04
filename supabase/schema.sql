@@ -1452,6 +1452,17 @@ begin
         order by r.start_time desc
         limit 10
       ) t
+    ),
+    'cleanup', jsonb_build_object(
+      'total_deleted', (select coalesce(sum(deleted_count), 0) from clip_cleanup_log),
+      'recent_runs', (
+        select coalesce(jsonb_agg(t), '[]'::jsonb) from (
+          select run_at, deleted_count, grace_period_days, view_threshold
+          from clip_cleanup_log
+          order by run_at desc
+          limit 10
+        ) t
+      )
     )
   ) into v_result;
 
@@ -1648,3 +1659,67 @@ as $$
   join members m on m.id = c.anon_id
   where c.id = any(comment_ids);
 $$;
+
+-- 低視聴回数クリップの自動整理（2026-09-04追加）。Supabase Free Plan(0.5GB)の容量超過対策。
+-- 作成から14日（猶予期間）を過ぎ、視聴回数が50回未満のクリップを毎日削除する。
+-- 1回の呼び出しでは最大p_batch_size件のみ処理する（数十万件規模を一度に消そうとすると
+-- daily_ranking_posts.clip_idへの外部キー制約チェックの積み重ねでstatement timeoutになることを
+-- 本番で実測したため）。comments/favorites/reactions/clip_reaction_stampsはON DELETE CASCADEの
+-- ため連動して自動的に消える。daily_ranking_posts（X自動投稿の履歴、ON DELETE NO ACTION）から
+-- 参照されているクリップは削除対象から除外する。
+create table if not exists clip_cleanup_log (
+  id bigint generated always as identity primary key,
+  run_at timestamptz not null default now(),
+  deleted_count integer not null,
+  grace_period_days integer not null,
+  view_threshold integer not null
+);
+
+create or replace function cleanup_low_view_clips(
+  p_grace_period_days int default 14,
+  p_view_threshold int default 50,
+  p_batch_size int default 2000
+)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_deleted_count integer;
+begin
+  with target as (
+    select c.id
+    from clips c
+    where c.id <> '__general_thread__'
+      and c.twitch_created_at < now() - (p_grace_period_days || ' days')::interval
+      and c.view_count < p_view_threshold
+      and not exists (select 1 from daily_ranking_posts d where d.clip_id = c.id)
+    limit p_batch_size
+  ),
+  deleted as (
+    delete from clips where id in (select id from target)
+    returning id
+  )
+  select count(*) into v_deleted_count from deleted;
+
+  insert into clip_cleanup_log (deleted_count, grace_period_days, view_threshold)
+  values (v_deleted_count, p_grace_period_days, p_view_threshold);
+
+  return v_deleted_count;
+end;
+$$;
+
+revoke execute on function cleanup_low_view_clips(int, int, int) from public;
+grant execute on function cleanup_low_view_clips(int, int, int) to service_role;
+
+-- 毎日UTC 18:00（JST 3:00）にpg_cronから直接呼ぶ（Twitch APIを叩かない純粋なSQL操作のため、
+-- 他の同期ジョブと違いGitHub Actions経由にしない）。
+select cron.schedule(
+  'trigger-cleanup-low-view-clips',
+  '0 18 * * *',
+  $$
+  select cleanup_low_view_clips();
+  select refresh_ranking_views();
+  $$
+);
