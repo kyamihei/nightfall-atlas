@@ -61,10 +61,20 @@ export default function PrivacyPage() {
           第三者へ提供することはありません。メールアドレスの入力は任意です。
         </p>
 
-        <h2 style={styles.h2}>Cookie・広告について</h2>
+        <h2 style={styles.h2}>Cookie・アクセス解析について</h2>
         <p style={styles.p}>
-          本サイトでは、広告配信や第三者による行動追跡のためのCookie・トラッキングツールは使用していません。
-          匿名識別子の保持にはブラウザのローカルストレージを利用しています。
+          本サイトでは、広告配信のためのCookie・トラッキングツールは使用していません。匿名識別子の保持には
+          ブラウザのローカルストレージを利用しています。
+        </p>
+        <p style={styles.p}>
+          一方で、サイトの利用状況を把握し改善に役立てる目的で、Google アナリティクスを利用しています。
+          Google アナリティクスは匿名化されたアクセス情報の収集にCookieを使用しますが、氏名・メールアドレス等、
+          個人を特定できる情報を取得することはありません。収集されたデータはGoogleのプライバシーポリシーに基づき
+          管理されます。Cookieの利用を望まない場合は、
+          <a href="https://tools.google.com/dlpage/gaoptout" target="_blank" rel="noopener noreferrer" style={styles.link}>
+            Google アナリティクス オプトアウト アドオン
+          </a>
+          等を利用することで、ブラウザの設定からCookieを無効にできます。
         </p>
 
         <h2 style={styles.h2}>本ポリシーの変更</h2>
@@ -100,4 +110,5 @@ const styles = {
   h2: { fontSize: 15, fontWeight: 600, margin: "22px 0 8px", color: "#EDEDF2" },
   section: { fontSize: 13.5, lineHeight: 1.9, color: "#C4C4D0" },
   p: { margin: "0 0 12px" },
+  link: { color: "#47BFFF" },
 };
