@@ -937,6 +937,64 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
     配信者名1つ・タイトル1つ等）ならこれまで通りの手計算試算で十分だが、可変要素が絡むと
     手計算の組み合わせ爆発が発生し見落としやすい。
 
+### クリップ職人ランキング投稿に画像を添付（2026-09-04追加）
+
+- 「名前だけの文字情報より、サイトの雰囲気（ランキング画面の実際の見た目）を知ってほしい」
+  という要望を受け、土曜の投稿にClipRanking.jsxの`WeeklyClipperBoard`（トップページの
+  週間クリップ職人ランキング表示）を模したカード画像を添付するようにした。
+- **画像生成**: `imagescript`（`jsr:@matmen/imagescript@1.3.1`、Deno上で動く純粋なJS/WASM
+  実装の画像処理ライブラリ、ネイティブ依存なし）を新規依存として追加し、`buildClipperRankingCard()`
+  がその場で1200幅・可変高さ（人数分だけの高さにして5人に満たない週でも余白ができないように
+  している）のPNGを生成する。構成要素: サイトのブランドカラー（コーラルレッド・紫・水色）を
+  ぼかし風に配置した背景ブロブ（実際のblur処理ではなく、中心から外側へアルファを線形に
+  落とすグラデーションで代用。imagescriptの型定義に`blur()`が無く型チェックが通らなかったため）、
+  「クリスレ」ブランド文字、順位ごとのカード（丸角パネル、金/銀/銅のランク番号色は
+  `ClipRanking.jsx`の`WEEKLY_RANK_ACCENTS`と統一、Twitchアバターを円形クロップして表示、
+  名前・視聴回数）。
+  - **日本語フォントの選定**: Google FontsのNoto Sans JPはvariable font（`[wght].ttf`）のみの
+    配布で、imagescriptの文字シェイパー（HarfBuzz系WASM）との相性が不明だったため避け、
+    静的ウェイトが配布されている**M PLUS 1p Bold**（google/fontsリポジトリの
+    `ofl/mplus1p/MPLUS1p-Bold.ttf`を実行時に直接fetch、約1.7MB）を採用した。実際に日本語文字列
+    （感嘆符・絵文字混じり含む）が正しくレンダリングされることを確認済み。
+  - サイトのfavicon（`public/favicon.ico`）を画像に載せることも検討したが、ICOフォーマットは
+    imagescriptの`Image.decode`が非対応（デコード失敗を確認済み）だったため見送り、
+    ブランドカラーのテキストロゴのみにした。
+- **Xへのメディアアップロード**: X API v1.1の単純アップロード（`POST media/upload.json`）は
+  現在の公式ドキュメント（docs.x.com）から姿を消しており、代わりにv2のchunked upload
+  （`/2/media/upload/initialize` → `/2/media/upload/{id}/append` → `.../finalize`、必要なら
+  `GET /2/media/upload?command=STATUS`でポーリング）が案内されている（2026-09-04調査時点）。
+  OAuth 1.0aはこれらのエンドポイントでも動作することを公式ドキュメント・開発者コミュニティで
+  確認できたため、新規のOAuth2フロー導入は不要だった。画像は数百KB程度でX側の上限
+  （5MB）に対して十分小さいため、appendは1回（`segment_index=0`）のみで足りる設計にしている。
+  - **append方式の選定**: appendはmultipart/form-dataとJSON+base64のどちらもサポートされて
+    いるが、「OAuth 1.0a×multipartの署名まわりで"could not authenticate you"になる」という
+    報告が開発者コミュニティで散見されたため、あえてJSON+base64を使った。これなら
+    `/2/tweets`等このファイルの他のPOST呼び出しと全く同じ「JSON bodyは署名対象に含めない」
+    という仕組みで安全に扱える（大きめのUint8Arrayを`btoa`に直接spreadするとスタック上限に
+    達しうるため、`bytesToBase64()`で32KBずつ小分けにしている）。
+  - GETのSTATUS確認だけはクエリパラメータ（`command`/`media_id`）を署名に含める必要があるため、
+    既存の`buildOAuthHeader(method, url)`に`extraParams`引数を追加して対応した
+    （POST側の各呼び出しは従来通り第3引数を省略すればよい、後方互換）。
+  - **フォールバック設計**: 画像機能の不具合で毎週の投稿自体が止まってしまうことを避けるため、
+    失敗を2段階で吸収している。①`buildClipperRankingCard()`自体の失敗（フォント/アバター
+    取得先の一時的な障害等）は`buildClipperSpotlightPost()`内でtry/catchし、`imageBytes: null`
+    としてテキストのみの投稿を続行する。②画像生成には成功したがXへのアップロード自体が
+    失敗した場合は、`main()`側で改めてテキストのみの`postTweet()`を呼び直す。
+  - アバター画像個別の取得失敗（Twitch側で削除済み等）もその1行だけ省略して他の行は表示を
+    続ける設計（`buildClipperRankingCard`内で行ごとにtry/catch）。
+- **本番での実投稿確認は未実施**（2026-09-04時点）。実際にXへ投稿する行為はユーザーの
+  X公式アカウントに実害を伴うため、本セッションでは行っていない。かわりに
+  ①`deno check`での型検証、②`buildClipperRankingCard`を実データ（本番Supabaseの
+  `get_top_clippers_by_period`結果・実際のTwitchアバターURL）で呼び出し画像を目視確認
+  （5人分・2人分＋アバター欠損ケースの両方）、③`buildClipperSpotlightPost`をエンドツーエンドで
+  呼び出しテキスト・画像バイト列が正しく組み立つことを確認、の3点で検証済み。
+  実際のXアップロード（`initializeMediaUpload`/`appendMediaChunk`/`finalizeMediaUpload`）と
+  `/2/tweets`への画像添付は、公式ドキュメント・開発者コミュニティの記述に基づいて実装した
+  ものの、本物のクレデンシャルでの動作は次回土曜の自動実行（またはユーザーによる手動実行）が
+  初回になる。**もし失敗する場合、最初に疑うべき点**: ①`media_category`/`media_type`の値、
+  ②`api.x.com`ホスト（`/2/tweets`は従来通り`api.twitter.com`のまま変更していない、
+  混在させている）、③append方式（JSON+base64 vs multipart）のOAuth1署名の相性。
+
 # ステアリング
 
 - git commitを行う際は、同じタイミングでリモート（origin）へのpushも必ず行うこと。ユーザーから別途pushを依頼されるのを待たない。

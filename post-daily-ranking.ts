@@ -25,6 +25,7 @@
 // （このプロジェクトの「スクリプトは自己完結させる」方針を踏襲）。
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { Image } from "jsr:@matmen/imagescript@1.3.1";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -156,8 +157,18 @@ async function hmacSha1Base64(key: string, message: string): Promise<string> {
   return btoa(String.fromCharCode(...new Uint8Array(signature)));
 }
 
-/** OAuth 1.0aのAuthorizationヘッダーを組み立てる（POST /2/tweetsのJSON bodyはこの署名対象に含めない、OAuth1仕様上フォームエンコードのbody/クエリのみが対象のため） */
-async function buildOAuthHeader(method: string, url: string): Promise<string> {
+/**
+ * OAuth 1.0aのAuthorizationヘッダーを組み立てる。
+ * JSON body・multipart bodyはOAuth1.0a仕様上署名対象に含めない（フォームエンコードのbody・
+ * クエリパラメータのみが対象）ため、このプロジェクトの各POST呼び出しは基本JSON bodyにしている。
+ * GETのクエリパラメータ（メディアアップロードのSTATUS確認で使用）のように署名に含める必要が
+ * ある場合だけextraParamsに渡す（2026-09-04、クリップ職人ランキング画像添付機能の追加で拡張）。
+ */
+async function buildOAuthHeader(
+  method: string,
+  url: string,
+  extraParams: Record<string, string> = {},
+): Promise<string> {
   const oauthParams: Record<string, string> = {
     oauth_consumer_key: X_API_KEY,
     oauth_nonce: randomNonce(),
@@ -167,7 +178,7 @@ async function buildOAuthHeader(method: string, url: string): Promise<string> {
     oauth_version: "1.0",
   };
 
-  const sortedParams = Object.entries(oauthParams)
+  const sortedParams = Object.entries({ ...oauthParams, ...extraParams })
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([k, v]) => `${percentEncode(k)}=${percentEncode(v)}`)
     .join("&");
@@ -185,9 +196,12 @@ async function buildOAuthHeader(method: string, url: string): Promise<string> {
   return `OAuth ${headerStr}`;
 }
 
-async function postTweet(text: string): Promise<string> {
+async function postTweet(text: string, mediaId?: string): Promise<string> {
   const url = "https://api.twitter.com/2/tweets";
   const authHeader = await buildOAuthHeader("POST", url);
+
+  const body: Record<string, unknown> = { text };
+  if (mediaId) body.media = { media_ids: [mediaId] };
 
   const res = await fetch(url, {
     method: "POST",
@@ -195,7 +209,7 @@ async function postTweet(text: string): Promise<string> {
       Authorization: authHeader,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify(body),
   });
 
   const data = await res.json();
@@ -205,14 +219,267 @@ async function postTweet(text: string): Promise<string> {
   return data.data.id as string;
 }
 
+// ============================================================
+// Xメディアアップロード（v2チャンクドアップロード）
+// ============================================================
+//
+// クリップ職人ランキングの投稿にサイトの雰囲気が伝わる画像を添付したいという要望への対応
+// （2026-09-04）。X API v1.1の単純アップロード（POST media/upload.json）は現在の公式ドキュメント
+// から姿を消しており、代わりにv2のchunked upload（initialize→append→finalize、必要なら
+// STATUSポーリング）が案内されている（2026-09-04調査時点、docs.x.com）。OAuth 1.0aは
+// これらのエンドポイントでも動作する（devcommunity.x.comで確認）。
+// appendステップはmultipart/form-dataとJSON+base64のどちらもサポートされているが、
+// OAuth1.0a×multipartの署名まわりは実装依存の不具合報告が散見される（"could not authenticate
+// you"等）ため、あえてJSON+base64を使う。JSON bodyを署名対象に含めない、というこのファイルの
+// 他のPOST呼び出し（/2/tweets等）と全く同じ仕組みで安全に扱えるため。
+// 画像はサイズが小さい（数百KB程度、X側の上限5MBに対して十分小さい）ため、チャンクは
+// 1回（segment_index=0）のみで足りる設計にしている。
+
+/** 大きめのUint8Arrayをbtoaに直接spreadすると引数展開でスタック上限に達しうるため、小分けにする */
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+async function initializeMediaUpload(totalBytes: number): Promise<string> {
+  const url = "https://api.x.com/2/media/upload/initialize";
+  const authHeader = await buildOAuthHeader("POST", url);
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { Authorization: authHeader, "Content-Type": "application/json" },
+    body: JSON.stringify({ media_type: "image/png", media_category: "tweet_image", total_bytes: totalBytes }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(`メディアアップロード初期化に失敗しました（${res.status}）: ${JSON.stringify(data)}`);
+  return data.data.id as string;
+}
+
+async function appendMediaChunk(mediaId: string, bytes: Uint8Array): Promise<void> {
+  const url = `https://api.x.com/2/media/upload/${mediaId}/append`;
+  const authHeader = await buildOAuthHeader("POST", url);
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { Authorization: authHeader, "Content-Type": "application/json" },
+    body: JSON.stringify({ media: bytesToBase64(bytes), segment_index: 0 }),
+  });
+  if (!res.ok) {
+    const data = await res.text();
+    throw new Error(`メディアアップロード（append）に失敗しました（${res.status}）: ${data}`);
+  }
+}
+
+interface MediaProcessingInfo {
+  state: string;
+  check_after_secs?: number;
+}
+
+/** GET /2/media/upload?command=STATUS&media_id=...（クエリパラメータを署名に含める必要がある唯一の呼び出し） */
+async function getMediaUploadStatus(mediaId: string): Promise<MediaProcessingInfo | undefined> {
+  const baseUrl = "https://api.x.com/2/media/upload";
+  const queryParams = { command: "STATUS", media_id: mediaId };
+  const authHeader = await buildOAuthHeader("GET", baseUrl, queryParams);
+  const res = await fetch(`${baseUrl}?${new URLSearchParams(queryParams).toString()}`, {
+    headers: { Authorization: authHeader },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(`メディア処理状況の確認に失敗しました（${res.status}）: ${JSON.stringify(data)}`);
+  return data.data?.processing_info as MediaProcessingInfo | undefined;
+}
+
+async function finalizeMediaUpload(mediaId: string): Promise<void> {
+  const url = `https://api.x.com/2/media/upload/${mediaId}/finalize`;
+  const authHeader = await buildOAuthHeader("POST", url);
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { Authorization: authHeader, "Content-Type": "application/json" },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(`メディアアップロード確定に失敗しました（${res.status}）: ${JSON.stringify(data)}`);
+
+  // 画像は基本的に同期処理で完了するはずだが、仕様上processing_infoが返ることがあるため
+  // 念のため数回だけSTATUSをポーリングする（最大5回、check_after_secsに従って待つ）
+  let processingInfo = data.data?.processing_info as MediaProcessingInfo | undefined;
+  for (let attempt = 0; processingInfo && processingInfo.state !== "succeeded" && attempt < 5; attempt++) {
+    if (processingInfo.state === "failed") {
+      throw new Error(`メディアの処理に失敗しました: ${JSON.stringify(processingInfo)}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, (processingInfo!.check_after_secs ?? 1) * 1000));
+    processingInfo = await getMediaUploadStatus(mediaId);
+  }
+}
+
+/** 画像バイト列をXにアップロードし、ツイート添付用のmedia_idを返す */
+async function uploadImageMedia(bytes: Uint8Array): Promise<string> {
+  const mediaId = await initializeMediaUpload(bytes.length);
+  await appendMediaChunk(mediaId, bytes);
+  await finalizeMediaUpload(mediaId);
+  return mediaId;
+}
+
+// ============================================================
+// クリップ職人ランキング画像の生成
+// ============================================================
+//
+// 「名前だけの文字情報より、サイトの雰囲気を知ってほしい」という要望を受け、ClipRanking.jsxの
+// WeeklyClipperBoard（トップページの週間クリップ職人ランキング表示）を模したカード画像を
+// imagescript（jsr:@matmen/imagescript、Deno上で動く純粋なJS/WASM実装の画像処理ライブラリ、
+// ネイティブ依存なし）で毎回その場で生成する。フォントは日本語カバレッジのある静的
+// （非variable）フォントが要る。Noto Sans JPはGoogle Fontsの配布がvariable font
+// （`[wght].ttf`）のみで、imagescriptの文字シェイパーとの相性が未検証だったため避け、
+// 静的ウェイトが配布されているM PLUS 1p Bold（google/fontsリポジトリから直接fetch、
+// 約1.7MB）を採用した（実際にJapanese文字列のレンダリングを確認済み）。
+const CARD_FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/mplus1p/MPLUS1p-Bold.ttf";
+const CARD_WIDTH = 1200;
+const CARD_ROW_TOP = 190;
+const CARD_ROW_HEIGHT = 92;
+// ClipRanking.jsxのWEEKLY_RANK_ACCENTSと合わせた金・銀・銅
+const CARD_RANK_COLORS: Record<number, [number, number, number]> = {
+  1: [255, 200, 87], // #FFC857
+  2: [201, 206, 218], // #C9CEDA
+  3: [217, 142, 93], // #D98E5D
+};
+
+type CardImage = InstanceType<typeof Image>;
+
+function cardColor(r: number, g: number, b: number, a = 255): number {
+  return Image.rgbaToColor(r, g, b, a);
+}
+
+async function cardText(
+  fontBytes: Uint8Array,
+  str: string,
+  size: number,
+  r: number,
+  g: number,
+  b: number,
+): Promise<CardImage> {
+  return await Image.renderText(fontBytes, size, str, cardColor(r, g, b));
+}
+
+/** 背景の柔らかい発光ブロブ（サイトのbgGlow演出を模した装飾）。中心から外側へアルファを落として合成する */
+function drawGlowBlob(
+  canvas: CardImage,
+  cx: number,
+  cy: number,
+  radius: number,
+  r: number,
+  g: number,
+  b: number,
+  alpha: number,
+): void {
+  const size = radius * 2;
+  const blob = new Image(size, size);
+  blob.fill((x: number, y: number) => {
+    const dx = x - radius;
+    const dy = y - radius;
+    const dist = Math.sqrt(dx * dx + dy * dy) / radius;
+    const a = dist > 1 ? 0 : Math.round(alpha * (1 - dist));
+    return cardColor(r, g, b, a);
+  });
+  // 中心から外側へアルファを線形に落とすグラデーション自体で十分柔らかく見えるため、
+  // 実際にぼかす処理（blur）はかけていない（imagescriptの型定義に無く、型チェックが通らないため）
+  canvas.composite(blob, Math.round(cx - radius), Math.round(cy - radius));
+}
+
+interface ClipperCardEntry {
+  creator_name: string;
+  total_views: number;
+  profile_image_url: string | null;
+}
+
+/**
+ * 週間クリップ職人ランキング（1〜5人）をサイトのWeeklyClipperBoardを模したカード画像にする。
+ * フォント取得・アバター取得はそれぞれtry/catchし、1人分のアバター取得に失敗しても
+ * （Twitch側の画像が削除済み等）他の行やテキストは表示を続ける。呼び出し側
+ * （buildClipperSpotlightPost）でさらに全体をtry/catchしており、この関数自体が失敗しても
+ * 投稿はテキストのみで続行される。
+ */
+async function buildClipperRankingCard(clippers: ClipperCardEntry[]): Promise<Uint8Array> {
+  const fontRes = await fetch(CARD_FONT_URL);
+  if (!fontRes.ok) throw new Error(`カード用フォントの取得に失敗しました（${fontRes.status}）`);
+  const fontBytes = new Uint8Array(await fontRes.arrayBuffer());
+
+  // 人数分だけの高さにし、5人に満たない週でも下に無駄な余白ができないようにする
+  const height = CARD_ROW_TOP + clippers.length * CARD_ROW_HEIGHT + 70;
+  const canvas = new Image(CARD_WIDTH, height);
+  canvas.fill((x: number, y: number) => {
+    const t = (x / CARD_WIDTH + y / height) / 2;
+    return cardColor(Math.round(16 + t * 10), Math.round(14 + t * 6), Math.round(24 + t * 20));
+  });
+  // サイトのブランドカラー（コーラルレッド・紫・水色）のブロブをうっすら配置
+  drawGlowBlob(canvas, 80, 60, 260, 255, 77, 109, 65);
+  drawGlowBlob(canvas, CARD_WIDTH - 50, 100, 300, 126, 20, 255, 50);
+  drawGlowBlob(canvas, CARD_WIDTH - 170, height - 60, 260, 71, 191, 255, 40);
+
+  const brand = await cardText(fontBytes, "クリスレ", 32, 255, 77, 109);
+  canvas.composite(brand, 44, 38);
+  const title = await cardText(fontBytes, "週間クリップ職人ランキング", 50, 237, 237, 242);
+  canvas.composite(title, 44, 80);
+
+  const panelX = 40;
+  const panelW = CARD_WIDTH - 80;
+  const panelH = 80;
+
+  for (let i = 0; i < clippers.length; i++) {
+    const c = clippers[i];
+    const rank = i + 1;
+    const rowY = CARD_ROW_TOP + i * CARD_ROW_HEIGHT;
+
+    const panel = new Image(panelW, panelH);
+    panel.fill(cardColor(28, 28, 38, 235));
+    panel.roundCorners(16);
+    canvas.composite(panel, panelX, rowY - 6);
+
+    const [rr, rg, rb] = CARD_RANK_COLORS[rank] ?? [138, 138, 153];
+    const rankImg = await cardText(fontBytes, String(rank), 42, rr, rg, rb);
+    canvas.composite(rankImg, panelX + 24, rowY + 10);
+
+    if (c.profile_image_url) {
+      try {
+        const avatarRes = await fetch(c.profile_image_url);
+        if (avatarRes.ok) {
+          const avatar = await Image.decode(new Uint8Array(await avatarRes.arrayBuffer()));
+          avatar.resize(60, 60);
+          avatar.cropCircle();
+          canvas.composite(avatar, panelX + 100, rowY + 10);
+        }
+      } catch (e) {
+        console.warn(`${c.creator_name}のアバター取得に失敗したため省略します:`, e);
+      }
+    }
+
+    const nameImg = await cardText(fontBytes, c.creator_name, 30, 237, 237, 242);
+    canvas.composite(nameImg, panelX + 180, rowY + 2);
+    const viewsImg = await cardText(fontBytes, `${formatViews(c.total_views)}回視聴`, 19, 151, 151, 166);
+    canvas.composite(viewsImg, panelX + 180, rowY + 46);
+  }
+
+  const footerY = CARD_ROW_TOP + clippers.length * CARD_ROW_HEIGHT + 20;
+  canvas.drawBox(panelX, footerY, panelW, 3, cardColor(255, 77, 109, 200));
+  const urlImg = await cardText(fontBytes, "kurisure.jp", 22, 151, 151, 166);
+  canvas.composite(urlImg, panelX, footerY + 16);
+
+  return await canvas.encode();
+}
+
 type PostType = "ranking" | "clipper_spotlight" | "feature_intro";
 
 const BOARD_PITCH = "コメントもできるTwitchクリップの掲示板「クリスレ」";
 
+interface BuiltPost {
+  text: string;
+  clipId: string | null;
+  imageBytes: Uint8Array | null;
+}
+
 async function buildRankingPost(
   // deno-lint-ignore no-explicit-any
   supabase: any,
-): Promise<{ text: string; clipId: string | null } | null> {
+): Promise<BuiltPost | null> {
   const { start, end, dateStr } = yesterdayJstRangeUtc(new Date());
   const { data: topClips, error } = await supabase
     .from("clips")
@@ -248,13 +515,13 @@ async function buildRankingPost(
     `${BOARD_PITCH}で続きをチェック👇`,
     `${SITE_ORIGIN}/clips/${top.id}`,
   ].join("\n");
-  return { text, clipId: top.id };
+  return { text, clipId: top.id, imageBytes: null };
 }
 
 async function buildClipperSpotlightPost(
   // deno-lint-ignore no-explicit-any
   supabase: any,
-): Promise<{ text: string; clipId: null } | null> {
+): Promise<BuiltPost | null> {
   const now = new Date();
   const periodStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const periodEnd = now.toISOString();
@@ -290,10 +557,23 @@ async function buildClipperSpotlightPost(
   const runnersUpLine = buildRunnersUpLine(runnersUp, remainingBudget);
   if (runnersUpLine) lines.splice(2, 0, runnersUpLine); // 1位の行の直後に挿入
 
-  return { text: lines.join("\n"), clipId: null };
+  // サイトの雰囲気（ランキング表示の見た目）が伝わる画像を添付する（2026-09-04追加、
+  // ユーザー要望）。画像生成に失敗しても投稿自体は諦めない設計にしている（フォント/アバター
+  // 取得先の一時的な障害等を想定し、その場合はテキストのみで投稿を続行する。main()側でも
+  // アップロード自体の失敗を別途テキストのみ投稿へフォールバックさせている、二重の保険）。
+  let imageBytes: Uint8Array | null = null;
+  try {
+    imageBytes = await buildClipperRankingCard(
+      (data as ClipperCardEntry[]).slice(0, 5),
+    );
+  } catch (e) {
+    console.warn("クリップ職人ランキング画像の生成に失敗したため、テキストのみで投稿します:", e);
+  }
+
+  return { text: lines.join("\n"), clipId: null, imageBytes };
 }
 
-function buildFeatureIntroPost(): { text: string; clipId: null } {
+function buildFeatureIntroPost(): BuiltPost {
   const text = [
     `お気に入りのクリップ、ちゃんと保存できてますか？`,
     ``,
@@ -301,7 +581,7 @@ function buildFeatureIntroPost(): { text: string; clipId: null } {
     ``,
     `${SITE_ORIGIN}/favorites`,
   ].join("\n");
-  return { text, clipId: null };
+  return { text, clipId: null, imageBytes: null };
 }
 
 async function main() {
@@ -332,8 +612,25 @@ async function main() {
 
   console.log(`投稿タイプ: ${postType}\n投稿内容:\n${built.text}`);
 
-  const tweetId = await postTweet(built.text);
-  console.log(`投稿しました（tweet id: ${tweetId}）`);
+  // 画像付き投稿は、アップロードそのものの失敗（X側の一時的な障害・仕様変更等）も
+  // テキストのみの投稿へフォールバックさせる（画像機能の不具合で毎週の投稿自体が
+  // 止まってしまうことを避けるため、buildClipperRankingCard内のtry/catchとは別に
+  // ここでも保険をかけている）。
+  let tweetId: string;
+  if (built.imageBytes) {
+    try {
+      const mediaId = await uploadImageMedia(built.imageBytes);
+      tweetId = await postTweet(built.text, mediaId);
+      console.log(`投稿しました（画像付き、tweet id: ${tweetId}）`);
+    } catch (e) {
+      console.warn("画像付き投稿に失敗したため、テキストのみで投稿し直します:", e);
+      tweetId = await postTweet(built.text);
+      console.log(`投稿しました（tweet id: ${tweetId}）`);
+    }
+  } else {
+    tweetId = await postTweet(built.text);
+    console.log(`投稿しました（tweet id: ${tweetId}）`);
+  }
 
   const { error: insertErr } = await supabase
     .from("daily_ranking_posts")
