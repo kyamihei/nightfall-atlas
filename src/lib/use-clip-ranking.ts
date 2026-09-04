@@ -81,6 +81,7 @@ export function useClips(
   page = 1,
   sortBy: SortBy = "views",
   streamerFilter?: string[] | null,
+  gameFilter?: string | null,
 ) {
   const [clips, setClips] = useState<Clip[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -107,6 +108,7 @@ export function useClips(
       // 空配列/未指定時はキーごと省略する（他のRPC引数と同じ理由。nullを明示的に渡すと
       // PostgRESTのプリペアードステートメントが汎用実行計画になり索引が使われなくなる恐れがある）
       if (streamerFilter && streamerFilter.length > 0) rpcArgs.streamer_filter = streamerFilter;
+      if (gameFilter) rpcArgs.game_filter = gameFilter;
 
       const { data, error } = await supabase.rpc("get_ranked_clips", rpcArgs);
       if (cancelled) return;
@@ -138,9 +140,42 @@ export function useClips(
     // streamerFilterは配列（参照型）なのでuseEffectの依存配列に直接入れず、
     // 内容を表す安定した文字列キーに変換してから使う（他のクリップID配列を渡すフックと同じ対策）
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [limit, period, referenceDate?.getTime(), page, sortBy, streamerFilter?.join(",")]);
+  }, [limit, period, referenceDate?.getTime(), page, sortBy, streamerFilter?.join(","), gameFilter]);
 
   return { clips, loading, error, totalCount };
+}
+
+export interface TopGame {
+  game: string;
+  clip_count: number;
+  total_views: number;
+}
+
+/**
+ * ゲームカテゴリごとのクリップ数・総視聴回数（人気順）。「今何のゲームが流行っているか」を
+ * 一覧できるようにする絞り込みドロップダウン用（2026-09-04追加）。live集計はclips全体への
+ * group byになりタイムアウトの恐れがあるため、事前集計済みのtop_games_mvを読むだけの
+ * get_top_games RPCを使う。
+ */
+export function useTopGames(limit = 50) {
+  const [games, setGames] = useState<TopGame[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const { data, error } = await supabase.rpc("get_top_games", { games_limit: limit });
+      if (cancelled) return;
+      if (!error) setGames(data ?? []);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [limit]);
+
+  return { games, loading };
 }
 
 /** クリップ詳細ページ用に、単一クリップをidで取得する */

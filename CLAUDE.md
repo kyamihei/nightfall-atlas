@@ -1553,6 +1553,42 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   以降は日次cronが14日+50回未満の新規該当分（実測では1日あたり数百件程度）を淡々と
   処理していく想定。
 
+## ゲームカテゴリでのクリップ絞り込み機能（2026-09-04追加）
+
+「ゲームカテゴリごとのクリップ一覧を見られるようにしたい。今流行っているゲームだけ見る、
+みたいな」という要望への対応。トップページのランキングコントロール行に、既存の配信者タグ
+絞り込み（`tagFilter`）と同じ見た目・パターンで「ゲームで絞り込み」`&lt;select&gt;`を追加した。
+
+- **DB**: `supabase/migrations/20260904100000_game_filter.sql`→
+  `20260904110000_game_filter_unbounded_perf_fix.sql`（2段階）。`get_ranked_clips()`に
+  `game_filter text default null`を追加（既存の`streamer_filter`と全く同じパターンで
+  全分岐に`and (game_filter is null or c.game = game_filter)`を追加）。ドロップダウンの
+  選択肢用に`top_games_mv`（ゲームごとのクリップ数・総視聴回数、`不明`は除外）と
+  `get_top_games(games_limit)` RPCを新設、`refresh_ranking_views()`にも組み込んだ。
+  **重要なハマりどころ（本番実測）**: 最初「期間絞り込みと同じmaterialized CTEパターンを
+  流用すればいい」と考えて実装したところ、全期間×人気ゲーム（Grand Theft Auto V、
+  12万9088件）で**11.2秒**かかることが判明した（期間で絞る場合は対象行数が少数に収まるため
+  軽いが、gameだけで絞ると対象が数万〜十数万件になりうり、materialized CTEはLIMITを見ずに
+  対象行を幅広い列ごと全件具体化してからソートするため重くなる）。対策として
+  `idx_clips_game_views(game, view_count desc)`・`idx_clips_game_created(game,
+  twitch_created_at desc)`の複合索引を追加し、「全期間×game_filterのみ」の場合に限り
+  materialized CTEを使わない直接クエリ（索引順そのままLIMIT）にする専用分岐を追加した
+  （実測11.2秒→8ms〜0.3秒程度）。単独の`idx_clips_game`はこれらの複合索引のleftmost
+  prefixで代替されるため削除した。
+  **意図的にスコープ外とした点**: `streamer_filter`のみ（配信者タグ機能、2026-09-03）で
+  全期間を絞り込む既存のケースも理論上同じリスクを抱えているが、個人タグは対象配信者数が
+  少なく実害未確認のため今回は対応していない。将来同様のタイムアウトが実際に発生したら
+  同じ考え方（複合索引＋非materialized化）で対応すること。
+  **もう一つの発見**: ゲームの種類は「数十〜数百」という想定と異なり、実際には**3,080種類**
+  存在した（「日本語配信であれば対象ゲーム問わず追跡する」discoverTopJapaneseBroadcasters
+  の副作用）。全件を選択肢にするのは非現実的なため、ドロップダウンは全期間累計視聴回数の
+  上位150件に絞っている（ユーザー要望の具体例だった「スーパーマリオメーカー2」は
+  累計視聴回数で88位だったため、上位50件では収まらず150件に調整した）。
+- **フロント**: `src/lib/use-clip-ranking.ts`に`useTopGames(limit)`フックを追加、`useClips`に
+  `gameFilter`引数を追加（未指定時はキーごと省略する既存パターンを踏襲）。
+  `ClipRanking.jsx`のランキングコントロール行に4つ目の`&lt;select&gt;`として追加、
+  期間・並び替え・タグ絞り込みと同じ「変更時に1ページ目へ戻す」`useEffect`にも組み込んだ。
+
 # ステアリング
 
 - git commitを行う際は、同じタイミングでリモート（origin）へのpushも必ず行うこと。ユーザーから別途pushを依頼されるのを待たない。

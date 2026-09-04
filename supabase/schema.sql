@@ -57,6 +57,13 @@ on conflict (id) do nothing;
 -- ORDER BY view_count DESC LIMITを索引スキャンだけで完結させる。
 create index if not exists idx_clips_view_count on clips(view_count desc);
 
+-- get_ranked_clipsのgame_filter用（2026-09-04追加）。全期間×人気ゲームの組み合わせで
+-- game単独索引では対象行数が多すぎてORDER BY view_count/twitch_created_atのソートが
+-- 遅くなる（本番実測11秒超）ため、view_count/twitch_created_atと複合させて索引順のまま
+-- LIMITできるようにする。単独のgame索引はこれらのleftmost prefixで代替されるため作らない。
+create index if not exists idx_clips_game_views on clips(game, view_count desc);
+create index if not exists idx_clips_game_created on clips(game, twitch_created_at desc);
+
 -- いいね / よくないね（1人1票、取り消し可）
 create table if not exists reactions (
   id uuid primary key default gen_random_uuid(),
@@ -638,11 +645,12 @@ returns table(creator_id text, creator_name text, total_views bigint, clip_count
   limit clipper_limit offset clipper_offset;
 $$ language sql stable;
 
--- ランキング一覧を「視聴回数順(views) / 新着順(newest) / いいね順(likes) / コメント数順(comments)」の
--- いずれかで並び替え、期間フィルタ・ページネーションを一度に処理して返す。
--- count(*) over() で「期間フィルタ後の全件数」も同時に返すため、フロント側は別途件数取得が不要。
+-- ランキング一覧を「視聴回数順(views) / 新着順(newest) / いいね順(likes) / コメント数順(comments) /
+-- お気に入り順(favorites) / スタンプ順(reactions)」のいずれかで並び替え、期間・配信者・ゲームの
+-- 絞り込みとページネーションを一度に処理して返す。
+-- count(*) over() で「絞り込み後の全件数」も同時に返すため、フロント側は別途件数取得が不要。
 --
--- 実装メモ（すべて本番での実測タイムアウトを踏まえた対応）:
+-- 実装メモ（すべて本番での実測タイムアウトを踏まえた対応。詳細はCLAUDE.md参照）:
 -- 1. period_start/period_endは「未指定なら絞り込まない」を "is null or ..." ではなく
 --    -infinity/infinityのデフォルト値で表現している。PostgRESTはRPCをプリペアードステートメントとして
 --    実行するため、"(param is null or col >= param)" という書き方だと呼び出し回数を重ねた際に
@@ -652,22 +660,31 @@ $$ language sql stable;
 -- 2. views/newest（デフォルト・新着順）はreactions/commentsとのJOINが不要なため、
 --    集計を一切せずclipsだけを索引スキャン+LIMITする軽量経路を使う
 --    （views/newestはユーザーが最も頻繁に使う並び替えのため、従来の性能を維持する）。
--- 3. likes/comments（いいね順・コメント数順）は集計が必須で、reactions/comments（小さいテーブル）を
---    起点にclipsへJOINすることで、期間を絞らない「全期間」指定時でもclips全件（数十万行）を
---    スキャンせずに済むようにしている（反応/コメントが0件のクリップはこの並び順には現れない）。
+-- 3. likes/comments/favorites/reactions（各種エンゲージメント順）は集計が必須で、
+--    対応する小さいテーブルを起点にclipsへJOINすることで、絞り込みなし「全期間」指定時でも
+--    clips全件（数十万行）をスキャンせずに済むようにしている（該当エンゲージメントが0件の
+--    クリップはこの並び順には現れない）。
 -- 4. creator_id/creator_name（クリップ職人）も返す。行ごとの「ランキング内順位」バッジは
 --    別途get_clipper_ranks RPCでcreator_id単位にまとめて引く設計（クリップ1件ごとに
 --    ランキング計算をするとN+1になるため）。
 -- 5. '__general_thread__' は総合スレ用のダミークリップ行（後述）。ランキングには一切出さないため
 --    全分岐のWHEREでid <> '__general_thread__'を明示的に外す。
+-- 6. views（デフォルト）は「絞り込み一切無し」「全期間＋game_filterのみ」「期間で絞り込みあり」の
+--    3パターンで実行計画を分ける（2026-09-04追加のgame_filterで、全期間×人気ゲームの組み合わせが
+--    materialized CTE経由だと11秒超になることが判明したため。idx_clips_game_viewsに直接乗る
+--    非materialized化した専用パスを追加した）。streamer_filterのみでの全期間絞り込みは
+--    既存のmaterialized CTE経由のまま（個人タグは対象配信者数が少なく実害未確認のため今回は対象外、
+--    将来同様のタイムアウトが出たら同じ考え方で対応する）。
 drop function if exists get_ranked_clips(timestamptz, timestamptz, text, int, int);
+drop function if exists get_ranked_clips(timestamptz, timestamptz, text, int, int, text[]);
 create or replace function get_ranked_clips(
   period_start timestamptz default '-infinity',
   period_end timestamptz default 'infinity',
   sort_by text default 'views',
   page_limit int default 20,
   page_offset int default 0,
-  streamer_filter text[] default null
+  streamer_filter text[] default null,
+  game_filter text default null
 )
 returns table(
   id text,
@@ -688,7 +705,9 @@ returns table(
 ) as $$
 declare
   v_total bigint;
-  v_unbounded boolean := period_start = '-infinity'::timestamptz and period_end = 'infinity'::timestamptz and streamer_filter is null;
+  v_unbounded boolean := period_start = '-infinity'::timestamptz and period_end = 'infinity'::timestamptz
+    and streamer_filter is null and game_filter is null;
+  v_period_unbounded boolean := period_start = '-infinity'::timestamptz and period_end = 'infinity'::timestamptz;
 begin
   if sort_by = 'likes' then
     -- いいね順・コメント数順は、反応/コメントが1件も付いていないクリップまで含めて
@@ -696,7 +715,7 @@ begin
     -- statement_timeout(3s)を超えるため、reactions側を起点にする。
     -- 「反応が0件のクリップ」はこのランキングには現れない仕様とする
     -- （エンゲージメント順のランキングとしては一般的な挙動で、性能上も現実的）。
-    -- streamer_filterは配信者への個人タグ絞り込み用（省略時は絞り込みなし、idx_clips_streamer使用）。
+    -- streamer_filter/game_filterは絞り込み用（省略時は絞り込みなし）。
     return query
       with agg as (
         select r.clip_id,
@@ -713,6 +732,7 @@ begin
           and c.twitch_created_at < period_end
           and c.id <> '__general_thread__'
           and (streamer_filter is null or c.streamer = any(streamer_filter))
+          and (game_filter is null or c.game = game_filter)
       )
       select
         m.id, m.title, m.streamer, m.game, m.view_count, m.thumbnail_url, m.twitch_created_at,
@@ -738,6 +758,7 @@ begin
           and c.twitch_created_at < period_end
           and c.id <> '__general_thread__'
           and (streamer_filter is null or c.streamer = any(streamer_filter))
+          and (game_filter is null or c.game = game_filter)
       )
       select
         m.id, m.title, m.streamer, m.game, m.view_count, m.thumbnail_url, m.twitch_created_at,
@@ -764,6 +785,7 @@ begin
           and c.twitch_created_at < period_end
           and c.id <> '__general_thread__'
           and (streamer_filter is null or c.streamer = any(streamer_filter))
+          and (game_filter is null or c.game = game_filter)
       )
       select
         m.id, m.title, m.streamer, m.game, m.view_count, m.thumbnail_url, m.twitch_created_at,
@@ -789,6 +811,7 @@ begin
           and c.twitch_created_at < period_end
           and c.id <> '__general_thread__'
           and (streamer_filter is null or c.streamer = any(streamer_filter))
+          and (game_filter is null or c.game = game_filter)
       )
       select
         m.id, m.title, m.streamer, m.game, m.view_count, m.thumbnail_url, m.twitch_created_at,
@@ -801,7 +824,9 @@ begin
   elsif sort_by = 'newest' then
     -- 「全期間」（絞り込みなし）の正確なCOUNT(*)はclips全件を走査するため、
     -- pg_class.reltuples（統計情報ベースの概算値、O(1)）で代用する。
-    -- 期間・配信者いずれかで絞り込んでいる場合は対象行数が少なく、正確なCOUNTでも安価なためそのまま数える。
+    -- 期間・配信者・ゲームいずれかで絞り込んでいる場合は対象行数が少なく、正確なCOUNTでも安価なため
+    -- そのまま数える。newestはmaterialized CTEを使わない直接クエリのため、game_filter付きでも
+    -- idx_clips_game_createdにそのまま乗る（追加対応不要）。
     if v_unbounded then
       select reltuples::bigint into v_total from pg_class where oid = 'clips'::regclass;
     else
@@ -809,7 +834,8 @@ begin
       from clips c
       where c.twitch_created_at >= period_start
         and c.twitch_created_at < period_end
-        and (streamer_filter is null or c.streamer = any(streamer_filter));
+        and (streamer_filter is null or c.streamer = any(streamer_filter))
+        and (game_filter is null or c.game = game_filter);
     end if;
 
     -- ORDER BYの列をCASE式で包むと索引が使われなくなるため、newest/views は
@@ -830,36 +856,92 @@ begin
         and c.twitch_created_at < period_end
         and c.id <> '__general_thread__'
         and (streamer_filter is null or c.streamer = any(streamer_filter))
+        and (game_filter is null or c.game = game_filter)
       order by c.twitch_created_at desc, c.id
       limit page_limit offset page_offset;
   else
+    -- 視聴回数順（デフォルト）。
+    -- ①絞り込みが一切無い全期間: idx_clips_view_countをそのまま使う従来通りの高速パス。
+    -- ②全期間だがgame_filterあり: materialized CTEだと対象行数が多い人気ゲームで遅くなる
+    --   （本番実測11.2秒）ため、idx_clips_game_views(game, view_count desc)にそのまま乗る
+    --   直接クエリにする（実測8ms〜0.3秒程度）。
+    -- ③期間が絞られている場合: 既存のmaterialized CTE（period-first、idx_clips_period_ranking
+    --   使用）。対象行数が期間で既に少数に絞られているため、game_filter/streamer_filterは
+    --   残り件数への単純な追加条件として評価されるだけで済む。
     if v_unbounded then
       select reltuples::bigint into v_total from pg_class where oid = 'clips'::regclass;
+
+      return query
+        select
+          c.id, c.title, c.streamer, c.game, c.view_count, c.thumbnail_url, c.twitch_created_at,
+          c.creator_id, c.creator_name,
+          0::bigint as likes,
+          0::bigint as dislikes,
+          0::bigint as comment_count,
+          0::bigint as favorite_count,
+          0::bigint as stamp_count,
+          v_total as total_count
+        from clips c
+        where c.id <> '__general_thread__'
+          and (streamer_filter is null or c.streamer = any(streamer_filter))
+          and (game_filter is null or c.game = game_filter)
+        order by c.view_count desc, c.id
+        limit page_limit offset page_offset;
+    elsif v_period_unbounded and game_filter is not null then
+      select count(*) into v_total
+      from clips c
+      where c.id <> '__general_thread__'
+        and (streamer_filter is null or c.streamer = any(streamer_filter))
+        and c.game = game_filter;
+
+      return query
+        select
+          c.id, c.title, c.streamer, c.game, c.view_count, c.thumbnail_url, c.twitch_created_at,
+          c.creator_id, c.creator_name,
+          0::bigint as likes,
+          0::bigint as dislikes,
+          0::bigint as comment_count,
+          0::bigint as favorite_count,
+          0::bigint as stamp_count,
+          v_total as total_count
+        from clips c
+        where c.id <> '__general_thread__'
+          and (streamer_filter is null or c.streamer = any(streamer_filter))
+          and c.game = game_filter
+        order by c.view_count desc, c.id
+        limit page_limit offset page_offset;
     else
       select count(*) into v_total
       from clips c
       where c.twitch_created_at >= period_start
         and c.twitch_created_at < period_end
-        and (streamer_filter is null or c.streamer = any(streamer_filter));
-    end if;
-
-    return query
-      select
-        c.id, c.title, c.streamer, c.game, c.view_count, c.thumbnail_url, c.twitch_created_at,
-        c.creator_id, c.creator_name,
-        0::bigint as likes,
-        0::bigint as dislikes,
-        0::bigint as comment_count,
-        0::bigint as favorite_count,
-        0::bigint as stamp_count,
-        v_total as total_count
-      from clips c
-      where c.twitch_created_at >= period_start
-        and c.twitch_created_at < period_end
-        and c.id <> '__general_thread__'
         and (streamer_filter is null or c.streamer = any(streamer_filter))
-      order by c.view_count desc, c.id
-      limit page_limit offset page_offset;
+        and (game_filter is null or c.game = game_filter);
+
+      return query
+        with matched as materialized (
+          select c.id, c.title, c.streamer, c.game, c.view_count, c.thumbnail_url, c.twitch_created_at,
+            c.creator_id, c.creator_name
+          from clips c
+          where c.twitch_created_at >= period_start
+            and c.twitch_created_at < period_end
+            and c.id <> '__general_thread__'
+            and (streamer_filter is null or c.streamer = any(streamer_filter))
+            and (game_filter is null or c.game = game_filter)
+        )
+        select
+          m.id, m.title, m.streamer, m.game, m.view_count, m.thumbnail_url, m.twitch_created_at,
+          m.creator_id, m.creator_name,
+          0::bigint as likes,
+          0::bigint as dislikes,
+          0::bigint as comment_count,
+          0::bigint as favorite_count,
+          0::bigint as stamp_count,
+          v_total as total_count
+        from matched m
+        order by m.view_count desc, m.id
+        limit page_limit offset page_offset;
+    end if;
   end if;
 end;
 $$ language plpgsql;
@@ -1317,6 +1399,28 @@ create materialized view admin_dashboard_clip_stats_mv as
 
 create unique index if not exists idx_admin_dashboard_clip_stats_mv_id on admin_dashboard_clip_stats_mv(stat_id);
 
+-- ゲームカテゴリごとの集計（2026-09-04追加）。「今何のゲームが流行っているか」が一目でわかる
+-- ドロップダウン用。clips全体へのlive集計（group by）はタイムアウトの恐れがあるためmv化する。
+-- 「不明」（Twitch側でカテゴリ名が解決できなかった場合のフォールバック値）は選択肢として
+-- 意味がないため除外する。
+drop materialized view if exists top_games_mv;
+create materialized view top_games_mv as
+  select game, count(*) as clip_count, sum(view_count) as total_views
+  from clips
+  where id <> '__general_thread__' and game is not null and game <> '不明'
+  group by game;
+
+create unique index if not exists idx_top_games_mv_game on top_games_mv(game);
+create index if not exists idx_top_games_mv_views on top_games_mv(total_views desc);
+
+create or replace function get_top_games(games_limit int default 50)
+returns table(game text, clip_count bigint, total_views bigint) as $$
+  select game, clip_count, total_views
+  from top_games_mv
+  order by total_views desc
+  limit games_limit;
+$$ language sql stable;
+
 create or replace function refresh_ranking_views()
 returns void as $$
 begin
@@ -1325,6 +1429,7 @@ begin
   refresh materialized view concurrently top_clippers_this_year_mv;
   refresh materialized view concurrently top_clippers_this_month_mv;
   refresh materialized view concurrently admin_dashboard_clip_stats_mv;
+  refresh materialized view concurrently top_games_mv;
 end;
 $$ language plpgsql security definer;
 
@@ -1334,6 +1439,7 @@ grant execute on function refresh_ranking_views() to service_role;
 -- 上のCREATE OR REPLACEだけだと初回はまだ空（1行も無い）ため、マイグレーション適用時に1度だけ
 -- 手動で埋めておく（以降はsync-twitch-clips.ts等が呼ぶrefresh_ranking_views()経由で更新される）。
 refresh materialized view admin_dashboard_clip_stats_mv;
+refresh materialized view top_games_mv;
 
 create or replace function admin_get_dashboard(p_password text)
 returns jsonb as $$

@@ -21,6 +21,7 @@ import {
   useMyBroadcasterTags,
   useCommentMemberBadges,
   useMembership,
+  useTopGames,
 } from "../lib/use-clip-ranking";
 import { REACTIONS_ENABLED } from "../lib/feature-flags";
 import { useActivityFeedPrefs, ACTIVITY_FEED_TYPES } from "../lib/use-activity-feed-prefs";
@@ -724,6 +725,11 @@ export default function ClipRanking() {
   const { tags: myTags, streamersByTag } = useMyBroadcasterTags();
   const tagStreamerFilter = tagFilter ? streamersByTag[tagFilter] ?? [] : null;
 
+  // ゲームカテゴリでの絞り込み（2026-09-04追加）。「今流行っているゲームだけ見たい」という要望への
+  // 対応。ドロップダウンの選択肢は人気順（総視聴回数順）で、今何が流行っているか一目でわかる。
+  const [gameFilter, setGameFilter] = useState(""); // ""=絞り込みなし
+  const { games: topGames } = useTopGames(150);
+
   // ヘッダーの「会員登録」リンクをログイン中のユーザーには出さない・代わりにログアウトを
   // 出す判定用（2026-09-04追加。ログイン中に「新規登録」フォームへ入ると既存メールの変更
   // フローに入ってしまい混乱を招く不具合が実際に発生したための対応）。
@@ -744,6 +750,7 @@ export default function ClipRanking() {
     page,
     sortBy,
     tagStreamerFilter,
+    gameFilter || null,
   );
   const { clips: trendingClips, loading: trendingLoading } = useTrendingClips(5, 72);
   const { items: activityItems } = useActivityFeed(15);
@@ -904,11 +911,11 @@ export default function ClipRanking() {
   const { request: requestBroadcaster, submitting: requesting, result: requestResult } = useBroadcasterRequest();
   const { report: reportComment } = useCommentReport();
 
-  // 期間・日付・並び替え・検索条件・タグ絞り込みが変わったら1ページ目に戻す
+  // 期間・日付・並び替え・検索条件・タグ絞り込み・ゲーム絞り込みが変わったら1ページ目に戻す
   // （違うページに条件が引き継がれて空表示になるのを防ぐ）
   useEffect(() => {
     setPage(1);
-  }, [period, selectedDay, sortBy, searchQuery, tagFilter]);
+  }, [period, selectedDay, sortBy, searchQuery, tagFilter, gameFilter]);
 
   // コメントパネルを開いている間はEscで閉じられるようにし、背後のページスクロールを止める
   useEffect(() => {
@@ -1231,6 +1238,21 @@ export default function ClipRanking() {
                   {myTags.map((t) => (
                     <option key={t} value={t}>
                       「{t}」タグのみ
+                    </option>
+                  ))}
+                </select>
+              )}
+              {topGames.length > 0 && (
+                <select
+                  value={gameFilter}
+                  onChange={(e) => setGameFilter(e.target.value)}
+                  style={styles.sortSelect}
+                  aria-label="ゲームで絞り込み"
+                >
+                  <option value="">すべてのゲーム</option>
+                  {topGames.map((g) => (
+                    <option key={g.game} value={g.game}>
+                      {g.game}
                     </option>
                   ))}
                 </select>
