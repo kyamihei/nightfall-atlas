@@ -1412,6 +1412,21 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   5ch風（レス番号・新しい順表示）に再設計」参照）なので、何階層深く返信が連なっても
   表示ロジックの変更は不要。
 
+## 総合スレに会員番号バッジが表示されない不具合を修正（2026-09-04追加）
+
+- 「総合スレでバッジが反映されてない」という指摘への対応。会員番号バッジ機能
+  （`useCommentMemberBadges`、`comments`テーブルの`anon_id`を`members`と突き合わせて
+  返す`get_comment_member_numbers` RPC）は元々`ClipDetail.jsx`と`ClipRanking.jsx`の
+  `CommentSidebar`にしか配線されておらず、`GeneralThread.jsx`（総合スレも同じ`comments`
+  テーブルに`clip_id = '__general_thread__'`として保存されるだけなので技術的には
+  対応できたはず）には元から一度も実装されていなかった。`GeneralThread.jsx`に
+  `useCommentMemberBadges`を配線し、他3箇所と同じ表示（コーラルレッドの`#番号`バッジ）を
+  追加した。
+- **タグスレ（`TagThreadDetail.jsx`）は対象外のまま**: タグスレのコメントは別テーブル
+  `tag_thread_comments`に保存されており、`get_comment_member_numbers`はこのテーブルを
+  見ていないため、同じ実装をそのまま流用できない（別途RPCが必要）。ユーザーから明示的な
+  要望があれば対応する。
+
 # ステアリング
 
 - git commitを行う際は、同じタイミングでリモート（origin）へのpushも必ず行うこと。ユーザーから別途pushを依頼されるのを待たない。

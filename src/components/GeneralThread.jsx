@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Send, Flag, CornerUpLeft, X, MessageSquare } from "lucide-react";
-import { useComments, useCommentReport, useClip } from "../lib/use-clip-ranking";
+import { useComments, useCommentReport, useClip, useCommentMemberBadges } from "../lib/use-clip-ranking";
 import { numberCommentsForDisplay, formatThreadTime } from "../lib/thread-format";
 import { supabase } from "../lib/supabase-client";
 import Footer from "./Footer";
@@ -25,6 +25,8 @@ export default function GeneralThread() {
 
   const { comments, submit, submitting, error: commentError } = useComments(GENERAL_THREAD_ID);
   const { report: reportComment } = useCommentReport();
+  const commentIds = useMemo(() => comments.map((c) => c.id), [comments]);
+  const memberBadges = useCommentMemberBadges(commentIds);
 
   const [nameDraft, setNameDraft] = useState("");
   const [draft, setDraft] = useState("");
@@ -99,7 +101,10 @@ export default function GeneralThread() {
         )}
         <div style={styles.commentHead}>
           <span style={styles.postNumber}>{c.number}</span>
-          <span style={styles.commentName}>{c.display_name}</span>
+          <span style={styles.commentName}>
+            {c.display_name}
+            {memberBadges[c.id] && <span style={styles.memberBadge}>#{memberBadges[c.id]}</span>}
+          </span>
           <span style={styles.commentTime}>{formatThreadTime(c.created_at)}</span>
           <div style={styles.commentHeadActions}>
             <button
@@ -275,6 +280,18 @@ const styles = {
   commentHead: { display: "flex", alignItems: "baseline", flexWrap: "wrap", gap: "4px 8px", marginBottom: 4 },
   postNumber: { fontSize: 12.5, fontWeight: 700, color: "#FF4D6D", fontFamily: "'Consolas', monospace" },
   commentName: { fontSize: 12.5, fontWeight: 600, color: "#5DCAA5" },
+  memberBadge: {
+    display: "inline-block",
+    marginLeft: 6,
+    fontSize: 10.5,
+    fontWeight: 700,
+    color: "#FF4D6D",
+    background: "#FF4D6D1A",
+    border: "1px solid #FF4D6D40",
+    borderRadius: 20,
+    padding: "1px 6px",
+    verticalAlign: 1,
+  },
   commentTime: { fontSize: 11.5, color: "#6B6B78", fontFamily: "'Consolas', monospace" },
   commentHeadActions: { display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" },
   commentBody: { fontSize: 13.5, margin: 0, lineHeight: 1.7, color: "#DADAE2", whiteSpace: "pre-wrap" },
