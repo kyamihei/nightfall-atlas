@@ -1818,6 +1818,25 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   （Twitchログインが任意で使えることには触れていないが、虚偽ではない）。将来的にAboutPageも
   会員登録機能に触れたい場合は別途対応が必要。
 
+## Google Search Consoleへの登録（2026-09-04追加）
+
+- **要望**: 「Google Search Consoleに登録してくれない？」という指示。
+- **実施内容**: claude-in-chromeでユーザーの（既にログイン済みの）Googleアカウントの
+  Search Consoleにアクセスし、`https://kurisure.jp/`をURLプレフィックスプロパティとして
+  追加。所有権確認は「HTMLタグ」方式を選択し、Googleが発行したverificationトークンを
+  `index.html`の`<head>`に`<meta name="google-site-verification" content="...">`として
+  追加してコミット・プッシュ（Vercel自動デプロイ）。本番反映を`curl`で確認したうえで
+  Search Console側の「確認」を実行し、「所有権を証明しました」を確認済み。続けて
+  既存の`https://kurisure.jp/sitemap.xml`（`api/sitemap.xml.js`が動的生成、
+  `vercel.json`のrewriteで`/sitemap.xml`にマッピング済み）をサイトマップとして送信した。
+- **ドメインプロパティ（DNS TXT方式）ではなくURLプレフィックスを選んだ理由**: DNSレコードの
+  追加にはドメインレジストラ／DNS管理画面へのアクセスが必要で、このセッションからは
+  操作できない。URLプレフィックス＋HTMLタグ方式なら、コードへの1行追加とデプロイだけで
+  完結するため、そちらを選んだ。
+- **注記**: サイトマップ送信直後は「取得できませんでした」とステータス表示されたが、これは
+  送信直後によくある一時的な表示で、`curl`で`/sitemap.xml`自体はHTTP 200・正しいXMLを
+  返すことを確認済み（実際のクロール・処理はGoogle側で後日行われる）。
+
 # ステアリング
 
 - git commitを行う際は、同じタイミングでリモート（origin）へのpushも必ず行うこと。ユーザーから別途pushを依頼されるのを待たない。
