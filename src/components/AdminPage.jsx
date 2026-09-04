@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import {
   ArrowLeft, Lock, LogOut, Mail, Flag, UserPlus, EyeOff, Eye, Check,
   LayoutDashboard, Users, Film, MessageCircle, Heart, Smile, Tag, Hash,
-  TrendingUp, Search, RefreshCw, Clock,
+  TrendingUp, Search, RefreshCw, Clock, Award, Trash2,
 } from "lucide-react";
 import {
   useAdminAuth,
@@ -11,6 +11,7 @@ import {
   useAdminContactMessages,
   useAdminCommentReports,
   useAdminBroadcasterRequests,
+  useAdminMembers,
 } from "../lib/use-admin";
 
 function formatNumber(n) {
@@ -360,11 +361,46 @@ function BroadcasterRequestsPanel({ password }) {
   );
 }
 
+function MembersPanel({ password }) {
+  const { members, loading, error, deleteMember } = useAdminMembers(password);
+
+  if (loading) return <p style={styles.loadingText}>読み込み中…</p>;
+  if (error) return <p style={styles.errorText}>{error}</p>;
+  if (members.length === 0) return <p style={styles.emptyText}>登録会員はまだいません。</p>;
+
+  function handleDelete(m) {
+    const ok = window.confirm(`会員番号 #${m.member_number}（${m.email}）の会員登録を取り消しますか？\n（コメントの番号バッジが消えます。アカウント自体は削除されません）`);
+    if (ok) deleteMember(m.id);
+  }
+
+  return (
+    <div style={styles.list}>
+      {members.map((m) => (
+        <div key={m.id} style={styles.card}>
+          <div style={styles.cardHead}>
+            <span style={styles.categoryBadge}>#{m.member_number}</span>
+            <span style={styles.cardTime}>{formatDateTime(m.registered_at)}</span>
+          </div>
+          <p style={styles.cardBody}>{m.email}</p>
+          <button
+            onClick={() => handleDelete(m)}
+            style={{ ...styles.actionBtn, color: "#F0997B", borderColor: "#F0997B55" }}
+          >
+            <Trash2 size={12} />
+            会員登録を削除
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 const TABS = [
   { key: "dashboard", label: "ダッシュボード", icon: LayoutDashboard },
   { key: "contact", label: "お問い合わせ", icon: Mail },
   { key: "reports", label: "コメント通報", icon: Flag },
   { key: "requests", label: "配信者リクエスト", icon: UserPlus },
+  { key: "members", label: "会員一覧", icon: Award },
 ];
 
 export default function AdminPage() {
@@ -413,6 +449,7 @@ export default function AdminPage() {
       {activeTab === "contact" && <ContactMessagesPanel password={password} />}
       {activeTab === "reports" && <CommentReportsPanel password={password} />}
       {activeTab === "requests" && <BroadcasterRequestsPanel password={password} />}
+      {activeTab === "members" && <MembersPanel password={password} />}
     </div>
   );
 }

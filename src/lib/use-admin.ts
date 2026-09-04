@@ -133,6 +133,38 @@ export function useAdminDashboard(password) {
   return { data, loading, error, refresh };
 }
 
+export function useAdminMembers(password) {
+  const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const refresh = useCallback(async () => {
+    if (!password) return;
+    setLoading(true);
+    const { data, error } = await supabase.rpc("admin_get_members", { p_password: password });
+    if (error) setError(error.message);
+    else {
+      setMembers(data ?? []);
+      setError(null);
+    }
+    setLoading(false);
+  }, [password]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const deleteMember = useCallback(
+    async (id) => {
+      await supabase.rpc("admin_delete_member", { p_password: password, p_id: id });
+      await refresh();
+    },
+    [password, refresh],
+  );
+
+  return { members, loading, error, refresh, deleteMember };
+}
+
 export function useAdminBroadcasterRequests(password) {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
