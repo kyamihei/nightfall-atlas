@@ -108,6 +108,25 @@ begin
   end if;
 end $$;
 
+-- クリップタグ（2026-09-05追加）。配信者・ゲームを問わず複数のクリップに共通する特徴
+-- （例:「ワイプ芸」）を、誰でも自由に付けられる公開タグ。clip_reaction_stampsと同じ
+-- 「複数の匿名ユーザーがそれぞれ独立に同じ値を付けられる」設計（unique(clip_id, anon_id, tag)、
+-- 付けた人数がそのまま人気度になる）。書き込みはtag_threadsと同じ「security definerのRPC
+-- 経由のみ」（レート制限をDB側で強制するため、直接INSERT/DELETEポリシーは無い）。
+create table if not exists clip_tags (
+  id uuid primary key default gen_random_uuid(),
+  clip_id text not null references clips(id) on delete cascade,
+  tag text not null check (char_length(tag) between 1 and 15),
+  anon_id uuid not null,
+  is_hidden boolean default false,
+  created_at timestamptz default now(),
+  unique (clip_id, anon_id, tag)
+);
+
+create index if not exists idx_clip_tags_clip on clip_tags(clip_id);
+-- get_ranked_clipsのtag_filter用。tag側から絞り込むため(tag, clip_id)の順。
+create index if not exists idx_clip_tags_tag on clip_tags(tag, clip_id);
+
 -- 配信者への個人タグ付け（「お気に入り配信者だけ見たい」「イベント参加者だけ見たい」等の
 -- 絞り込みのため、2026-09-03追加）。tracked_broadcasters.tag（運営が設定する公開タグ）とは別物で、
 -- こちらは完全に個人用（非公開）。同じ配信者に複数タグを付けられる。
@@ -237,6 +256,7 @@ alter table clips enable row level security;
 alter table reactions enable row level security;
 alter table favorites enable row level security;
 alter table clip_reaction_stamps enable row level security;
+alter table clip_tags enable row level security;
 alter table broadcaster_tags enable row level security;
 alter table comments enable row level security;
 alter table comment_reports enable row level security;
@@ -324,6 +344,12 @@ drop policy if exists "clip_reaction_stamps_delete_own" on clip_reaction_stamps;
 create policy "clip_reaction_stamps_delete_own" on clip_reaction_stamps
   for delete using (anon_id = auth.uid());
 
+-- clip_tags: 公開閲覧のみ許可（非表示にされた行は除く）。書き込みポリシーは無い
+-- （tag_threads/tag_thread_commentsと同じ「RPC経由のみ」方式、直接INSERT/DELETEは拒否される）。
+drop policy if exists "clip_tags_public_read" on clip_tags;
+create policy "clip_tags_public_read" on clip_tags
+  for select using (is_hidden = false);
+
 -- broadcaster_tags: 完全に個人用のデータなので、閲覧・追加・削除すべて本人のみ（公開readにしない）
 drop policy if exists "broadcaster_tags_select_own" on broadcaster_tags;
 create policy "broadcaster_tags_select_own" on broadcaster_tags
@@ -407,6 +433,74 @@ returns table(clip_id text, stamp text, stamp_count bigint) as $$
   from clip_reaction_stamps
   where clip_id = any(clip_ids)
   group by clip_id, stamp;
+$$ language sql stable;
+
+-- クリップにタグを付ける/外す（トグル、2026-09-05追加）。
+-- 既に自分がそのクリップにそのタグを付けていれば削除してadded=falseを返す（レート制限なし、
+-- 取り消しはいつでも可能）。付けていなければ、直近15秒以内に自分がclip_tagsへ書き込んで
+-- いないかチェックしてから挿入し、added=trueを返す（tag_thread_commentsの15秒レート制限と
+-- 同じ考え方）。returns table(tag text, ...)と本体内のテーブル列名が衝突するため、
+-- tag_threadsで踏んだ「列参照が曖昧」バグを避けるべく、テーブル参照には必ずエイリアスを付ける。
+drop function if exists toggle_clip_tag(text, text);
+create or replace function toggle_clip_tag(p_clip_id text, p_tag text)
+returns table(tag text, added boolean) as $$
+declare
+  v_uid uuid := auth.uid();
+  v_tag text := regexp_replace(trim(p_tag), '\s+', ' ', 'g');
+  v_existing_id uuid;
+begin
+  if v_uid is null then
+    raise exception '認証が必要です';
+  end if;
+  if v_tag = '' or char_length(v_tag) > 15 then
+    raise exception 'タグは1〜15文字で入力してください';
+  end if;
+  if not exists (select 1 from clips c where c.id = p_clip_id) then
+    raise exception '対象のクリップが見つかりません';
+  end if;
+
+  select ct.id into v_existing_id
+  from clip_tags ct
+  where ct.clip_id = p_clip_id and ct.anon_id = v_uid and ct.tag = v_tag;
+
+  if v_existing_id is not null then
+    delete from clip_tags where id = v_existing_id;
+    return query select v_tag, false;
+    return;
+  end if;
+
+  if exists (
+    select 1 from clip_tags ct
+    where ct.anon_id = v_uid and ct.created_at >= now() - interval '15 seconds'
+  ) then
+    raise exception '連続してタグを付けることはできません。少し待ってからお試しください';
+  end if;
+
+  insert into clip_tags (clip_id, tag, anon_id) values (p_clip_id, v_tag, v_uid);
+  return query select v_tag, true;
+end;
+$$ language plpgsql security definer;
+
+-- クリップIDの配列を渡すと、それぞれのタグごとの件数をまとめて返す（get_stamp_countsと同型）。
+create or replace function get_clip_tag_counts(clip_ids text[])
+returns table(clip_id text, tag text, tag_count bigint) as $$
+  select clip_id, tag, count(*) as tag_count
+  from clip_tags
+  where clip_id = any(clip_ids) and is_hidden = false
+  group by clip_id, tag;
+$$ language sql stable;
+
+-- 人気タグ一覧（フィルターの選択肢・タグ追加ポップアップの候補用）。clip_tagsはゲームカテゴリ
+-- （3,080種類）ほど多くならない想定のためlive集計で十分。実際に遅くなったらtop_games_mvと
+-- 同じ考え方で事前集計に切り替える。
+create or replace function get_top_clip_tags(p_limit int default 60)
+returns table(tag text, clip_count bigint) as $$
+  select tag, count(distinct clip_id) as clip_count
+  from clip_tags
+  where is_hidden = false
+  group by tag
+  order by clip_count desc, tag
+  limit p_limit;
 $$ language sql stable;
 
 -- ============================================================
@@ -677,6 +771,7 @@ $$ language sql stable;
 --    将来同様のタイムアウトが出たら同じ考え方で対応する）。
 drop function if exists get_ranked_clips(timestamptz, timestamptz, text, int, int);
 drop function if exists get_ranked_clips(timestamptz, timestamptz, text, int, int, text[]);
+drop function if exists get_ranked_clips(timestamptz, timestamptz, text, int, int, text[], text);
 create or replace function get_ranked_clips(
   period_start timestamptz default '-infinity',
   period_end timestamptz default 'infinity',
@@ -684,7 +779,8 @@ create or replace function get_ranked_clips(
   page_limit int default 20,
   page_offset int default 0,
   streamer_filter text[] default null,
-  game_filter text default null
+  game_filter text default null,
+  tag_filter text default null
 )
 returns table(
   id text,
@@ -706,7 +802,7 @@ returns table(
 declare
   v_total bigint;
   v_unbounded boolean := period_start = '-infinity'::timestamptz and period_end = 'infinity'::timestamptz
-    and streamer_filter is null and game_filter is null;
+    and streamer_filter is null and game_filter is null and tag_filter is null;
   v_period_unbounded boolean := period_start = '-infinity'::timestamptz and period_end = 'infinity'::timestamptz;
 begin
   if sort_by = 'likes' then
@@ -715,7 +811,7 @@ begin
     -- statement_timeout(3s)を超えるため、reactions側を起点にする。
     -- 「反応が0件のクリップ」はこのランキングには現れない仕様とする
     -- （エンゲージメント順のランキングとしては一般的な挙動で、性能上も現実的）。
-    -- streamer_filter/game_filterは絞り込み用（省略時は絞り込みなし）。
+    -- streamer_filter/game_filter/tag_filterは絞り込み用（省略時は絞り込みなし）。
     return query
       with agg as (
         select r.clip_id,
@@ -733,6 +829,9 @@ begin
           and c.id <> '__general_thread__'
           and (streamer_filter is null or c.streamer = any(streamer_filter))
           and (game_filter is null or c.game = game_filter)
+          and (tag_filter is null or exists (
+            select 1 from clip_tags ct where ct.clip_id = c.id and ct.tag = tag_filter and ct.is_hidden = false
+          ))
       )
       select
         m.id, m.title, m.streamer, m.game, m.view_count, m.thumbnail_url, m.twitch_created_at,
@@ -759,6 +858,9 @@ begin
           and c.id <> '__general_thread__'
           and (streamer_filter is null or c.streamer = any(streamer_filter))
           and (game_filter is null or c.game = game_filter)
+          and (tag_filter is null or exists (
+            select 1 from clip_tags ct where ct.clip_id = c.id and ct.tag = tag_filter and ct.is_hidden = false
+          ))
       )
       select
         m.id, m.title, m.streamer, m.game, m.view_count, m.thumbnail_url, m.twitch_created_at,
@@ -786,6 +888,9 @@ begin
           and c.id <> '__general_thread__'
           and (streamer_filter is null or c.streamer = any(streamer_filter))
           and (game_filter is null or c.game = game_filter)
+          and (tag_filter is null or exists (
+            select 1 from clip_tags ct where ct.clip_id = c.id and ct.tag = tag_filter and ct.is_hidden = false
+          ))
       )
       select
         m.id, m.title, m.streamer, m.game, m.view_count, m.thumbnail_url, m.twitch_created_at,
@@ -812,6 +917,9 @@ begin
           and c.id <> '__general_thread__'
           and (streamer_filter is null or c.streamer = any(streamer_filter))
           and (game_filter is null or c.game = game_filter)
+          and (tag_filter is null or exists (
+            select 1 from clip_tags ct where ct.clip_id = c.id and ct.tag = tag_filter and ct.is_hidden = false
+          ))
       )
       select
         m.id, m.title, m.streamer, m.game, m.view_count, m.thumbnail_url, m.twitch_created_at,
@@ -822,53 +930,137 @@ begin
       order by m.stamp_count desc, m.view_count desc, m.id
       limit page_limit offset page_offset;
   elsif sort_by = 'newest' then
-    -- 「全期間」（絞り込みなし）の正確なCOUNT(*)はclips全件を走査するため、
-    -- pg_class.reltuples（統計情報ベースの概算値、O(1)）で代用する。
-    -- 期間・配信者・ゲームいずれかで絞り込んでいる場合は対象行数が少なく、正確なCOUNTでも安価なため
-    -- そのまま数える。newestはmaterialized CTEを使わない直接クエリのため、game_filter付きでも
-    -- idx_clips_game_createdにそのまま乗る（追加対応不要）。
-    if v_unbounded then
-      select reltuples::bigint into v_total from pg_class where oid = 'clips'::regclass;
-    else
+    if tag_filter is not null then
+      -- tag_filterは（本番実測で判明、game_filter未対策時と同じ原因）unbounded期間でEXISTS越しに
+      -- clips全件を評価すると匿名ロールのタイムアウトを超える。clip_tags側（tagに索引あり、
+      -- 通常clips全体よりずっと小さい）を起点にJOINすることで回避する。1クリップに複数人が
+      -- 同じタグを付けうる（unique(clip_id, anon_id, tag)）ため、先にgroup byでclip_idを
+      -- 一意にしてからclipsへJOINする（重複行防止）。
+      with tagged as (
+        select ct.clip_id from clip_tags ct where ct.tag = tag_filter and ct.is_hidden = false
+        group by ct.clip_id
+      )
       select count(*) into v_total
-      from clips c
-      where c.twitch_created_at >= period_start
+      from tagged t
+      join clips c on c.id = t.clip_id
+      where c.id <> '__general_thread__'
+        and c.twitch_created_at >= period_start
         and c.twitch_created_at < period_end
         and (streamer_filter is null or c.streamer = any(streamer_filter))
         and (game_filter is null or c.game = game_filter);
-    end if;
 
-    -- ORDER BYの列をCASE式で包むと索引が使われなくなるため、newest/views は
-    -- 生の列を直接ORDER BYする専用の分岐に分ける。NULLS LASTも索引の既定順（NULLS FIRST）と
-    -- 食い違って索引が使えなくなるため付けない（twitch_created_atがnullのクリップはごく僅少）。
-    return query
-      select
-        c.id, c.title, c.streamer, c.game, c.view_count, c.thumbnail_url, c.twitch_created_at,
-        c.creator_id, c.creator_name,
-        0::bigint as likes,
-        0::bigint as dislikes,
-        0::bigint as comment_count,
-        0::bigint as favorite_count,
-        0::bigint as stamp_count,
-        v_total as total_count
-      from clips c
-      where c.twitch_created_at >= period_start
-        and c.twitch_created_at < period_end
-        and c.id <> '__general_thread__'
-        and (streamer_filter is null or c.streamer = any(streamer_filter))
-        and (game_filter is null or c.game = game_filter)
-      order by c.twitch_created_at desc, c.id
-      limit page_limit offset page_offset;
+      return query
+        with tagged as (
+          select ct.clip_id from clip_tags ct where ct.tag = tag_filter and ct.is_hidden = false
+          group by ct.clip_id
+        )
+        select
+          c.id, c.title, c.streamer, c.game, c.view_count, c.thumbnail_url, c.twitch_created_at,
+          c.creator_id, c.creator_name,
+          0::bigint as likes,
+          0::bigint as dislikes,
+          0::bigint as comment_count,
+          0::bigint as favorite_count,
+          0::bigint as stamp_count,
+          v_total as total_count
+        from tagged t
+        join clips c on c.id = t.clip_id
+        where c.id <> '__general_thread__'
+          and c.twitch_created_at >= period_start
+          and c.twitch_created_at < period_end
+          and (streamer_filter is null or c.streamer = any(streamer_filter))
+          and (game_filter is null or c.game = game_filter)
+        order by c.twitch_created_at desc, c.id
+        limit page_limit offset page_offset;
+    else
+      -- 「全期間」（絞り込みなし）の正確なCOUNT(*)はclips全件を走査するため、
+      -- pg_class.reltuples（統計情報ベースの概算値、O(1)）で代用する。
+      -- 期間・配信者・ゲームいずれかで絞り込んでいる場合は対象行数が少なく、正確なCOUNTでも安価なため
+      -- そのまま数える。newestはmaterialized CTEを使わない直接クエリのため、game_filter付きでも
+      -- idx_clips_game_createdにそのまま乗る（追加対応不要）。
+      if v_unbounded then
+        select reltuples::bigint into v_total from pg_class where oid = 'clips'::regclass;
+      else
+        select count(*) into v_total
+        from clips c
+        where c.twitch_created_at >= period_start
+          and c.twitch_created_at < period_end
+          and (streamer_filter is null or c.streamer = any(streamer_filter))
+          and (game_filter is null or c.game = game_filter);
+      end if;
+
+      -- ORDER BYの列をCASE式で包むと索引が使われなくなるため、newest/views は
+      -- 生の列を直接ORDER BYする専用の分岐に分ける。NULLS LASTも索引の既定順（NULLS FIRST）と
+      -- 食い違って索引が使えなくなるため付けない（twitch_created_atがnullのクリップはごく僅少）。
+      return query
+        select
+          c.id, c.title, c.streamer, c.game, c.view_count, c.thumbnail_url, c.twitch_created_at,
+          c.creator_id, c.creator_name,
+          0::bigint as likes,
+          0::bigint as dislikes,
+          0::bigint as comment_count,
+          0::bigint as favorite_count,
+          0::bigint as stamp_count,
+          v_total as total_count
+        from clips c
+        where c.twitch_created_at >= period_start
+          and c.twitch_created_at < period_end
+          and c.id <> '__general_thread__'
+          and (streamer_filter is null or c.streamer = any(streamer_filter))
+          and (game_filter is null or c.game = game_filter)
+        order by c.twitch_created_at desc, c.id
+        limit page_limit offset page_offset;
+    end if;
   else
     -- 視聴回数順（デフォルト）。
-    -- ①絞り込みが一切無い全期間: idx_clips_view_countをそのまま使う従来通りの高速パス。
-    -- ②全期間だがgame_filterあり: materialized CTEだと対象行数が多い人気ゲームで遅くなる
-    --   （本番実測11.2秒）ため、idx_clips_game_views(game, view_count desc)にそのまま乗る
+    -- ①tag_filterあり: clip_tags側を起点にJOINする専用パス（本番実測で判明、game_filter未対策時
+    --   と同じ理由でunbounded期間だと素朴なEXISTSが遅い。streamer_filter/game_filterはこの
+    --   小さな結果集合への追加条件として評価されるだけなので軽い）。
+    -- ②絞り込みが一切無い全期間: idx_clips_view_countをそのまま使う従来通りの高速パス。
+    -- ③全期間だがgame_filterあり（tag_filterなし）: materialized CTEだと対象行数が多い人気ゲームで
+    --   遅くなる（本番実測11.2秒）ため、idx_clips_game_views(game, view_count desc)にそのまま乗る
     --   直接クエリにする（実測8ms〜0.3秒程度）。
-    -- ③期間が絞られている場合: 既存のmaterialized CTE（period-first、idx_clips_period_ranking
-    --   使用）。対象行数が期間で既に少数に絞られているため、game_filter/streamer_filterは
-    --   残り件数への単純な追加条件として評価されるだけで済む。
-    if v_unbounded then
+    -- ④期間が絞られている場合（tag_filterなし）: 既存のmaterialized CTE（period-first、
+    --   idx_clips_period_ranking使用）。対象行数が期間で既に少数に絞られているため、
+    --   game_filter/streamer_filterは残り件数への単純な追加条件として評価されるだけで済む。
+    if tag_filter is not null then
+      with tagged as (
+        select ct.clip_id from clip_tags ct where ct.tag = tag_filter and ct.is_hidden = false
+        group by ct.clip_id
+      )
+      select count(*) into v_total
+      from tagged t
+      join clips c on c.id = t.clip_id
+      where c.id <> '__general_thread__'
+        and c.twitch_created_at >= period_start
+        and c.twitch_created_at < period_end
+        and (streamer_filter is null or c.streamer = any(streamer_filter))
+        and (game_filter is null or c.game = game_filter);
+
+      return query
+        with tagged as (
+          select ct.clip_id from clip_tags ct where ct.tag = tag_filter and ct.is_hidden = false
+          group by ct.clip_id
+        )
+        select
+          c.id, c.title, c.streamer, c.game, c.view_count, c.thumbnail_url, c.twitch_created_at,
+          c.creator_id, c.creator_name,
+          0::bigint as likes,
+          0::bigint as dislikes,
+          0::bigint as comment_count,
+          0::bigint as favorite_count,
+          0::bigint as stamp_count,
+          v_total as total_count
+        from tagged t
+        join clips c on c.id = t.clip_id
+        where c.id <> '__general_thread__'
+          and c.twitch_created_at >= period_start
+          and c.twitch_created_at < period_end
+          and (streamer_filter is null or c.streamer = any(streamer_filter))
+          and (game_filter is null or c.game = game_filter)
+        order by c.view_count desc, c.id
+        limit page_limit offset page_offset;
+    elsif v_unbounded then
       select reltuples::bigint into v_total from pg_class where oid = 'clips'::regclass;
 
       return query
@@ -1335,6 +1527,32 @@ returns void as $$
 begin
   perform admin_check_password(p_password);
   update comments set is_hidden = p_hidden where id = p_comment_id;
+end;
+$$ language plpgsql security definer;
+
+-- クリップタグの一覧・非表示切り替え（2026-09-05追加、admin_set_comment_hiddenと同じ
+-- hide-toggle方式、削除ではなく非表示にするだけ）
+create or replace function admin_get_recent_clip_tags(p_password text)
+returns table(
+  id uuid, clip_id text, clip_title text, tag text, anon_id uuid,
+  is_hidden boolean, created_at timestamptz
+) as $$
+begin
+  perform admin_check_password(p_password);
+  return query
+    select ct.id, ct.clip_id, cl.title, ct.tag, ct.anon_id, ct.is_hidden, ct.created_at
+    from clip_tags ct
+    left join clips cl on cl.id = ct.clip_id
+    order by ct.created_at desc
+    limit 200;
+end;
+$$ language plpgsql security definer;
+
+create or replace function admin_set_clip_tag_hidden(p_password text, p_id uuid, p_hidden boolean)
+returns void as $$
+begin
+  perform admin_check_password(p_password);
+  update clip_tags set is_hidden = p_hidden where id = p_id;
 end;
 $$ language plpgsql security definer;
 

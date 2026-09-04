@@ -12,6 +12,7 @@ import {
   useAdminCommentReports,
   useAdminBroadcasterRequests,
   useAdminMembers,
+  useAdminClipTags,
 } from "../lib/use-admin";
 
 function formatNumber(n) {
@@ -413,12 +414,46 @@ function MembersPanel({ password }) {
   );
 }
 
+function ClipTagsPanel({ password }) {
+  const { clipTags, loading, error, setHidden } = useAdminClipTags(password);
+
+  if (loading) return <p style={styles.loadingText}>読み込み中…</p>;
+  if (error) return <p style={styles.errorText}>{error}</p>;
+  if (clipTags.length === 0) return <p style={styles.emptyText}>付けられたタグはまだありません。</p>;
+
+  return (
+    <div style={styles.list}>
+      {clipTags.map((t) => (
+        <div key={t.id} style={styles.card}>
+          <div style={styles.cardHead}>
+            <span style={styles.categoryBadge}>{t.tag}</span>
+            <span style={styles.cardTime}>{formatDateTime(t.created_at)}</span>
+          </div>
+          {t.clip_id && (
+            <Link to={`/clips/${t.clip_id}`} style={styles.cardMetaLink}>
+              「{t.clip_title ?? "元のクリップ（削除済み）"}」を見る
+            </Link>
+          )}
+          <button
+            onClick={() => setHidden(t.id, !t.is_hidden)}
+            style={{ ...styles.actionBtn, color: t.is_hidden ? "#5DCAA5" : "#F0997B", borderColor: t.is_hidden ? "#5DCAA555" : "#F0997B55" }}
+          >
+            {t.is_hidden ? <Eye size={12} /> : <EyeOff size={12} />}
+            {t.is_hidden ? "表示に戻す" : "非表示にする"}
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 const TABS = [
   { key: "dashboard", label: "ダッシュボード", icon: LayoutDashboard },
   { key: "contact", label: "お問い合わせ", icon: Mail },
   { key: "reports", label: "コメント通報", icon: Flag },
   { key: "requests", label: "配信者リクエスト", icon: UserPlus },
   { key: "members", label: "会員一覧", icon: Award },
+  { key: "clipTags", label: "クリップタグ", icon: Tag },
 ];
 
 export default function AdminPage() {
@@ -468,6 +503,7 @@ export default function AdminPage() {
       {activeTab === "reports" && <CommentReportsPanel password={password} />}
       {activeTab === "requests" && <BroadcasterRequestsPanel password={password} />}
       {activeTab === "members" && <MembersPanel password={password} />}
+      {activeTab === "clipTags" && <ClipTagsPanel password={password} />}
     </div>
   );
 }

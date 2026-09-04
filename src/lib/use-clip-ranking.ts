@@ -82,6 +82,7 @@ export function useClips(
   sortBy: SortBy = "views",
   streamerFilter?: string[] | null,
   gameFilter?: string | null,
+  clipTagFilter?: string | null,
 ) {
   const [clips, setClips] = useState<Clip[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -109,6 +110,7 @@ export function useClips(
       // PostgRESTのプリペアードステートメントが汎用実行計画になり索引が使われなくなる恐れがある）
       if (streamerFilter && streamerFilter.length > 0) rpcArgs.streamer_filter = streamerFilter;
       if (gameFilter) rpcArgs.game_filter = gameFilter;
+      if (clipTagFilter) rpcArgs.tag_filter = clipTagFilter;
 
       const { data, error } = await supabase.rpc("get_ranked_clips", rpcArgs);
       if (cancelled) return;
@@ -140,7 +142,7 @@ export function useClips(
     // streamerFilterは配列（参照型）なのでuseEffectの依存配列に直接入れず、
     // 内容を表す安定した文字列キーに変換してから使う（他のクリップID配列を渡すフックと同じ対策）
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [limit, period, referenceDate?.getTime(), page, sortBy, streamerFilter?.join(","), gameFilter]);
+  }, [limit, period, referenceDate?.getTime(), page, sortBy, streamerFilter?.join(","), gameFilter, clipTagFilter]);
 
   return { clips, loading, error, totalCount };
 }
@@ -176,6 +178,36 @@ export function useTopGames(limit = 50) {
   }, [limit]);
 
   return { games, loading };
+}
+
+export interface TopClipTag {
+  tag: string;
+  clip_count: number;
+}
+
+/**
+ * 人気クリップタグ一覧（フィルターの選択肢・タグ追加ポップアップの候補用、2026-09-05追加）。
+ * useTopGamesと同型。clip_tagsはゲームカテゴリほど多くならない想定のためlive集計のRPCで十分。
+ */
+export function useTopClipTags(limit = 60) {
+  const [tags, setTags] = useState<TopClipTag[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const { data, error } = await supabase.rpc("get_top_clip_tags", { p_limit: limit });
+      if (cancelled) return;
+      if (!error) setTags(data ?? []);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [limit]);
+
+  return { tags, loading };
 }
 
 /** クリップ詳細ページ用に、単一クリップをidで取得する */
@@ -414,6 +446,64 @@ export function useClipStamps(clipIds: string[]) {
   );
 
   return { counts, myStamps, toggle };
+}
+
+/**
+ * クリップタグ（2026-09-05追加）。useClipStampsと同じ「counts（件数）/myTags（自分が付けた分）/
+ * toggle」構成だが、自由記述＋レート制限があるため書き込みはtoggle_clip_tag RPC経由にする
+ * （clip_reaction_stampsのような直接insert/deleteはしない。詳細はtoggle_clip_tag自体のコメント参照）。
+ * 読み取り（counts/myTags）はclip_tagsの公開readポリシーがあるためRPC・直接selectどちらも可能。
+ */
+export function useClipTags(clipIds: string[]) {
+  const [counts, setCounts] = useState<Record<string, Record<string, number>>>({});
+  const [myTags, setMyTags] = useState<Record<string, Set<string>>>({});
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    if (clipIds.length === 0) {
+      setCounts({});
+      setMyTags({});
+      return;
+    }
+    const user = await ensureAnonymousSession();
+    const [countsRes, ownRes] = await Promise.all([
+      supabase.rpc("get_clip_tag_counts", { clip_ids: clipIds }),
+      supabase.from("clip_tags").select("clip_id, tag").eq("anon_id", user.id).eq("is_hidden", false).in("clip_id", clipIds),
+    ]);
+
+    const nextCounts: Record<string, Record<string, number>> = {};
+    for (const row of (countsRes.data ?? []) as { clip_id: string; tag: string; tag_count: number }[]) {
+      (nextCounts[row.clip_id] ??= {})[row.tag] = Number(row.tag_count);
+    }
+    setCounts(nextCounts);
+
+    const nextOwn: Record<string, Set<string>> = {};
+    for (const row of (ownRes.data ?? []) as { clip_id: string; tag: string }[]) {
+      (nextOwn[row.clip_id] ??= new Set()).add(row.tag);
+    }
+    setMyTags(nextOwn);
+  }, [clipIds]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  // toggle_clip_tag RPCが「既に自分が付けていれば削除、なければ追加」を判定するため、
+  // クライアント側でalreadySelectedを見て分岐する必要はない（useClipStampsとの違い）。
+  const toggle = useCallback(
+    async (clipId: string, tag: string) => {
+      setError(null);
+      const { error: rpcError } = await supabase.rpc("toggle_clip_tag", { p_clip_id: clipId, p_tag: tag });
+      if (rpcError) {
+        setError(rpcError.message || "タグの更新に失敗しました");
+        return;
+      }
+      await refresh();
+    },
+    [refresh],
+  );
+
+  return { counts, myTags, toggle, error };
 }
 
 export interface ReactedClip extends Clip {

@@ -1919,6 +1919,48 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   ——今回のように「エラー自体は正しく検知できているのに、表示先の条件分岐のせいで誰にも
   見えない」というバグは、ログや例外が無いぶん発見が遅れやすい。
 
+## クリップタグ機能（2026-09-05追加）
+
+- 「ワイプ芸のような、配信者・ゲームを問わず複数のクリップに共通する特徴でまとめて見たい」
+  という要望への対応。誰でも自由にクリップへ公開タグを付けられ、そのタグでランキング一覧を
+  横断的に絞り込める（`clip_tags`テーブル、`supabase/migrations/20260905000000_clip_tags.sql`）。
+- **設計**: `clip_reaction_stamps`と同じ「複数の匿名ユーザーがそれぞれ独立に同じ値を付けられる」
+  方式（`unique(clip_id, anon_id, tag)`、付けた人数がそのまま人気度になる）。書き込みは
+  `tag_threads`と同じ「security definerのRPC（`toggle_clip_tag`）経由のみ」（直接INSERT/DELETE
+  ポリシーは無い、15秒のレート制限をDB側で強制）。NGワードチェックは`tag_thread_comments`と
+  同じ理由（自由記述だが15文字以内の短いラベルのため）で省略し、荒らし対策は管理画面の
+  非表示トグル（`admin_set_clip_tag_hidden`、削除ではなく`is_hidden`。`comment_reports`と同じ
+  hide-toggle方式、`members`のようなハード削除はしない）のみで対応している。
+  - **既知の制約（意図的に許容）**: 表記ゆれ（「ワイプ芸」/「わいぷ芸」）は別タグとして
+    分裂する。フィルターの`<select>`・タグ追加ポップアップの「人気タグ」候補（`get_top_clip_tags`）
+    の両方を「既存タグから選ぶ」UIにすることで、自由入力よりも再利用を促し実害を抑えている。
+- **`get_ranked_clips`にtag_filterを追加**（既存の`streamer_filter`/`game_filter`と同じ拡張
+  パターン、旧7引数シグネチャを`drop function if exists`してから8引数で再作成）。
+  - **ハマった点（実装中にテストで発見・即修正）**: 当初`game_filter`未対策時と全く同じ理由で、
+    tag_filter指定時（特に期間絞り込み無しの一番よくあるケース）に匿名ロールのタイムアウト
+    （57014）が発生した。原因もgame_filterの時と同じで、unbounded期間だと「clips全件を
+    materialized CTEでEXISTS越しに評価」という遅い経路に入ってしまうため。`views`
+    （デフォルト）・`newest`の2分岐だけ、tag_filterが指定されている場合は
+    `clip_tags(tag, clip_id)`索引を使ってclip_tags側を起点にJOINする専用パスに変更して解決
+    （実測0.25〜0.4秒）。1クリップに複数人が同じタグを付けうるため、JOIN前に`group by`で
+    clip_idを一意にしてから使うこと（でないと同じクリップが結果に重複して現れる）。
+    `likes`/`comments`/`favorites`/`reactions`の4分岐は元々小さいテーブル（reactions/comments等）
+    起点でJOINしているため、この専用パスは不要（EXISTS副問い合わせのままで問題ない）。
+  - **今後の教訓**: `get_ranked_clips`に新しい絞り込みパラメータを追加する際は、「join table
+    (小さいテーブル)を起点にできる形」で実装できないか先に検討すること。`clips`起点の
+    EXISTS/WHERE追加だけで済ませると、unbounded期間で必ずこの種のタイムアウトを踏む
+    （`game_filter`・`tag_filter`の両方で実際に踏んだ、同じ罠を3回目以降も踏む可能性が高い）。
+- UI: `ClipRanking.jsx`のクリップ一覧では、直近の「リアクションポップアップ化」で学んだ
+  スタッキングコンテキストの罠（カードの常時`transform`のせいで`position:absolute`の
+  ポップオーバーが下の行に隠れる）を踏まないよう、タグ追加もリアクションと全く同じ
+  `createPortal`＋`position:fixed`パターンにしている。また「7種類のリアクションスタンプが
+  常時表示だと場所を取る」という過去の指摘を踏まえ、タグも常時表示のチップ行は置かず、
+  「タグ」ボタン（件数バッジ付き）を押した時だけポップアップで見せる方式にした
+  （`ClipDetail.jsx`は1クリップのみ表示するページのため、スタンプ行と同様タグ行も常時表示のまま）。
+- **命名の罠**: `ClipRanking.jsx`には既に配信者タグ絞り込み用の`tagFilter`state（私用の
+  `broadcaster_tags`由来、`streamer_filter`に変換される）が存在するため、クリップタグの
+  絞り込みstateは`clipTagFilter`/`setClipTagFilter`という別名にして衝突を避けている。
+
 # ステアリング
 
 - git commitを行う際は、同じタイミングでリモート（origin）へのpushも必ず行うこと。ユーザーから別途pushを依頼されるのを待たない。

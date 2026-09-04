@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Heart, ThumbsDown, Star, Send, Flag, Loader2, CornerUpLeft, X, Scissors, MessageSquare } from "lucide-react";
+import { ArrowLeft, Heart, ThumbsDown, Star, Send, Flag, Loader2, CornerUpLeft, X, Scissors, MessageSquare, Plus } from "lucide-react";
 import {
   useClip,
   useReactions,
   useFavorites,
   useFavoriteCounts,
   useClipStamps,
+  useClipTags,
   useComments,
   useCommentReport,
   useBroadcasterAvatars,
@@ -55,6 +56,15 @@ export default function ClipDetail() {
     refreshFavoriteCounts();
   }
   const { counts: stampCounts, myStamps, toggle: toggleStamp } = useClipStamps(clipIds);
+  const { counts: clipTagCounts, myTags: myClipTags, toggle: toggleClipTag } = useClipTags(clipIds);
+  const [tagInput, setTagInput] = useState("");
+  function handleAddTag(e) {
+    e.preventDefault();
+    const trimmed = tagInput.trim();
+    if (!trimmed || !clip) return;
+    toggleClipTag(clip.id, trimmed);
+    setTagInput("");
+  }
   const avatars = useBroadcasterAvatars(clip ? [clip.streamer] : []);
   const clipperRanks = useClipperRanks(clip ? [clip.creator_id] : []);
   const { comments, submit, submitting, error: commentError } = useComments(id);
@@ -301,6 +311,41 @@ export default function ClipDetail() {
         })}
       </div>
 
+      <div style={styles.stampRow}>
+        {Object.entries(clipTagCounts[clip.id] ?? {})
+          .sort((a, b) => b[1] - a[1])
+          .map(([tag, count]) => {
+            const selected = myClipTags[clip.id]?.has(tag) ?? false;
+            return (
+              <button
+                key={tag}
+                onClick={() => toggleClipTag(clip.id, tag)}
+                style={{
+                  ...styles.stampBtn,
+                  color: selected ? "#5DCAA5" : "#8A8A99",
+                  borderColor: selected ? "#5DCAA555" : "#2E2E3A",
+                  background: selected ? "#15302966" : "transparent",
+                }}
+              >
+                {tag}
+                {count > 0 && <span style={styles.stampCount}>{count}</span>}
+              </button>
+            );
+          })}
+        <form onSubmit={handleAddTag} style={styles.tagAddForm}>
+          <input
+            value={tagInput}
+            onChange={(e) => setTagInput(e.target.value)}
+            placeholder="新しいタグ（15文字以内）"
+            maxLength={15}
+            style={styles.tagAddInput}
+          />
+          <button type="submit" style={styles.tagAddBtn} aria-label="タグを追加">
+            <Plus size={14} />
+          </button>
+        </form>
+      </div>
+
       <section style={styles.commentSection}>
         <h2 style={styles.commentHeading}>コメント（{comments.length}）</h2>
         <div style={styles.commentList}>
@@ -455,6 +500,28 @@ const styles = {
     fontWeight: 500,
   },
   stampCount: { fontSize: 11.5, color: "#6B6B78" },
+  tagAddForm: { display: "flex", gap: 6 },
+  tagAddInput: {
+    background: "#20202B",
+    border: "1px solid #2E2E3A",
+    borderRadius: 20,
+    padding: "6px 12px",
+    fontSize: 13,
+    color: "#EDEDF2",
+    width: 160,
+  },
+  tagAddBtn: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "#FF4D6D",
+    border: "none",
+    borderRadius: "50%",
+    color: "#1C1417",
+    width: 30,
+    height: 30,
+    flexShrink: 0,
+  },
   actionBtn: {
     display: "flex",
     alignItems: "center",

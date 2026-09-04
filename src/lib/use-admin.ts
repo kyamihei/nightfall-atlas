@@ -165,6 +165,40 @@ export function useAdminMembers(password) {
   return { members, loading, error, refresh, deleteMember };
 }
 
+// クリップタグの一覧・非表示切り替え（2026-09-05追加）。useAdminMembersと同じ構成だが、
+// 取り消せない削除ではなく可逆な非表示トグル（comment_reportsパネルと同じ考え方）にしている。
+export function useAdminClipTags(password) {
+  const [clipTags, setClipTags] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const refresh = useCallback(async () => {
+    if (!password) return;
+    setLoading(true);
+    const { data, error } = await supabase.rpc("admin_get_recent_clip_tags", { p_password: password });
+    if (error) setError(error.message);
+    else {
+      setClipTags(data ?? []);
+      setError(null);
+    }
+    setLoading(false);
+  }, [password]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const setHidden = useCallback(
+    async (id, hidden) => {
+      await supabase.rpc("admin_set_clip_tag_hidden", { p_password: password, p_id: id, p_hidden: hidden });
+      await refresh();
+    },
+    [password, refresh],
+  );
+
+  return { clipTags, loading, error, refresh, setHidden };
+}
+
 export function useAdminBroadcasterRequests(password) {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);

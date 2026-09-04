@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useSearchParams } from "react-router-dom";
-import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, SlidersHorizontal, Play, Flame, Settings, Sparkles, Smile } from "lucide-react";
+import { Heart, ThumbsDown, MessageCircle, Send, Loader2, Flag, UserPlus, X, ChevronLeft, ChevronRight, ChevronDown, ListChecks, Film, Star, CornerUpLeft, Scissors, TrendingUp, MessageSquare, SlidersHorizontal, Play, Flame, Settings, Sparkles, Smile, Tag, Plus } from "lucide-react";
 import {
   useClips,
   useReactions,
@@ -9,6 +9,8 @@ import {
   useFavoriteCounts,
   useClipStamps,
   REACTION_STAMPS,
+  useClipTags,
+  useTopClipTags,
   useComments,
   useBroadcasterSearch,
   useBroadcasterRequest,
@@ -108,6 +110,10 @@ function ClipRow({
   stampCounts,
   myStamps,
   onToggleStamp,
+  tagCounts,
+  myClipTags,
+  onToggleClipTag,
+  topClipTags,
   commentsActive,
   onOpenComments,
   onCommentsUpdate,
@@ -135,6 +141,15 @@ function ClipRow({
   const reactionTriggerRef = useRef(null);
   const reactionPanelRef = useRef(null);
 
+  // タグ追加ポップアップ（2026-09-05追加）。リアクションポップアップと全く同じ
+  // createPortal + position:fixed パターン（カードの常時transformによるスタッキング
+  // コンテキストの罠を避けるため）。
+  const [tagsOpen, setTagsOpen] = useState(false);
+  const [tagPopupPos, setTagPopupPos] = useState(null);
+  const [tagInput, setTagInput] = useState("");
+  const tagTriggerRef = useRef(null);
+  const tagPanelRef = useRef(null);
+
   useEffect(() => {
     if (!reactionsOpen) return;
     function handleClickOutside(e) {
@@ -157,6 +172,27 @@ function ClipRow({
     };
   }, [reactionsOpen]);
 
+  useEffect(() => {
+    if (!tagsOpen) return;
+    function handleClickOutside(e) {
+      if (tagTriggerRef.current?.contains(e.target) || tagPanelRef.current?.contains(e.target)) {
+        return;
+      }
+      setTagsOpen(false);
+    }
+    function handleScrollOrResize() {
+      setTagsOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    window.addEventListener("resize", handleScrollOrResize);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      window.removeEventListener("resize", handleScrollOrResize);
+    };
+  }, [tagsOpen]);
+
   function toggleReactionPopup(e) {
     e.stopPropagation();
     if (reactionsOpen) {
@@ -170,6 +206,27 @@ function ClipRow({
     setReactionsOpen(true);
   }
 
+  function toggleTagsPopup(e) {
+    e.stopPropagation();
+    if (tagsOpen) {
+      setTagsOpen(false);
+      return;
+    }
+    const rect = tagTriggerRef.current.getBoundingClientRect();
+    const width = 232;
+    const left = Math.min(Math.max(8, rect.right - width), window.innerWidth - width - 8);
+    setTagPopupPos({ top: rect.bottom + 8, left });
+    setTagsOpen(true);
+  }
+
+  function handleAddTag(e) {
+    e.preventDefault();
+    const trimmed = tagInput.trim();
+    if (!trimmed) return;
+    onToggleClipTag(clip.id, trimmed);
+    setTagInput("");
+  }
+
   useEffect(() => {
     onCommentsUpdate(clip.id, { comments, submit, submitting, error });
   }, [clip.id, comments, submit, submitting, error, onCommentsUpdate]);
@@ -177,6 +234,8 @@ function ClipRow({
   const tagStyle = getTagColor(clip.game);
   const rankAccent = getRankAccent(clip.rank);
   const totalStampCount = stampCounts ? Object.values(stampCounts).reduce((sum, n) => sum + n, 0) : 0;
+  const clipTagList = tagCounts ? Object.entries(tagCounts).sort((a, b) => b[1] - a[1]) : [];
+  const suggestedTags = (topClipTags ?? []).filter((t) => !tagCounts?.[t.tag]).slice(0, 6);
 
   return (
     <div
@@ -396,8 +455,89 @@ function ClipRow({
               style={{ transform: reactionsOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s ease" }}
             />
           </button>
+          <button
+            ref={tagTriggerRef}
+            onClick={toggleTagsPopup}
+            style={{
+              ...styles.actionBtn,
+              color: tagsOpen || clipTagList.length > 0 ? "#EDEDF2" : "#8A8A99",
+              borderColor: tagsOpen ? "#3A3A48" : "#2E2E3A",
+            }}
+            aria-expanded={tagsOpen}
+            aria-label="タグを付ける"
+          >
+            <Tag size={15} />
+            タグ
+            {clipTagList.length > 0 && <span style={styles.stampCount}>{clipTagList.length}</span>}
+            <ChevronDown
+              size={13}
+              style={{ transform: tagsOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s ease" }}
+            />
+          </button>
         </div>
       </div>
+
+      {tagsOpen &&
+        tagPopupPos &&
+        createPortal(
+          <div
+            ref={tagPanelRef}
+            className="cv-fade-in"
+            style={{ ...styles.tagPopup, top: tagPopupPos.top, left: tagPopupPos.left }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {clipTagList.length > 0 && (
+              <div style={styles.tagChipRow}>
+                {clipTagList.map(([tag, count]) => {
+                  const selected = myClipTags?.has(tag) ?? false;
+                  return (
+                    <button
+                      key={tag}
+                      onClick={() => onToggleClipTag(clip.id, tag)}
+                      style={{
+                        ...styles.stampBtn,
+                        color: selected ? "#5DCAA5" : "#8A8A99",
+                        borderColor: selected ? "#5DCAA555" : "#2E2E3A",
+                        background: selected ? "#15302966" : "transparent",
+                      }}
+                    >
+                      {tag}
+                      <span style={styles.stampCount}>{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <form onSubmit={handleAddTag} style={styles.tagAddForm}>
+              <input
+                value={tagInput}
+                onChange={(e) => setTagInput(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                placeholder="新しいタグ（15文字以内）"
+                maxLength={15}
+                style={styles.tagAddInput}
+              />
+              <button type="submit" style={styles.tagAddBtn} aria-label="タグを追加">
+                <Plus size={14} />
+              </button>
+            </form>
+            {suggestedTags.length > 0 && (
+              <div style={styles.tagSuggestRow}>
+                {suggestedTags.map((t) => (
+                  <button
+                    key={t.tag}
+                    onClick={() => onToggleClipTag(clip.id, t.tag)}
+                    style={styles.tagSuggestBtn}
+                  >
+                    <Plus size={11} />
+                    {t.tag}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>,
+          document.body
+        )}
 
       {reactionsOpen &&
         reactionPopupPos &&
@@ -805,6 +945,12 @@ export default function ClipRanking() {
   const [gameFilter, setGameFilter] = useState(""); // ""=絞り込みなし
   const { games: topGames } = useTopGames(150);
 
+  // クリップタグでの絞り込み（2026-09-05追加）。「ワイプ芸」のような、配信者・ゲームを問わず
+  // 複数のクリップに共通する特徴でまとめて見たい、という要望への対応。上の`tagFilter`
+  // （配信者タグ、私用の絞り込み）とは別物のため、変数名を`clipTagFilter`にして区別している。
+  const [clipTagFilter, setClipTagFilter] = useState(""); // ""=絞り込みなし
+  const { tags: topClipTags } = useTopClipTags(100);
+
   // コメント投稿時の「ニックネームで投稿」選択肢用（ヘッダー側の会員バッジ/ログアウト等は
   // 共通ヘッダーHeader.jsxへ移設済み、2026-09-04）。
   const { nickname } = useMembership();
@@ -816,6 +962,7 @@ export default function ClipRanking() {
     sortBy,
     tagStreamerFilter,
     gameFilter || null,
+    clipTagFilter || null,
   );
   const { clips: trendingClips, loading: trendingLoading } = useTrendingClips(PAGE_SIZE, 72);
   const { items: activityItems } = useActivityFeed(15);
@@ -869,6 +1016,7 @@ export default function ClipRanking() {
     [toggleFavoriteRaw, refreshFavoriteCounts],
   );
   const { counts: stampCounts, myStamps, toggle: toggleStamp } = useClipStamps(clipIds);
+  const { counts: clipTagCounts, myTags: myClipTags, toggle: toggleClipTag } = useClipTags(clipIds);
   const streamerNames = useMemo(() => {
     const names = new Set(clips.map((c) => c.streamer));
     trendingClips.forEach((c) => names.add(c.streamer));
@@ -983,7 +1131,7 @@ export default function ClipRanking() {
   // （違うページに条件が引き継がれて空表示になるのを防ぐ）
   useEffect(() => {
     setPage(1);
-  }, [period, selectedDay, sortBy, searchQuery, tagFilter, gameFilter]);
+  }, [period, selectedDay, sortBy, searchQuery, tagFilter, gameFilter, clipTagFilter]);
 
   // コメントパネルを開いている間はEscで閉じられるようにし、背後のページスクロールを止める
   useEffect(() => {
@@ -1246,6 +1394,25 @@ export default function ClipRanking() {
                       ))}
                     </select>
 
+                    {topClipTags.length > 0 && (
+                      <>
+                        <p style={styles.filterSectionLabel}>タグ</p>
+                        <select
+                          value={clipTagFilter}
+                          onChange={(e) => setClipTagFilter(e.target.value)}
+                          style={styles.filterSelect}
+                          aria-label="クリップタグで絞り込み"
+                        >
+                          <option value="">すべてのタグ</option>
+                          {topClipTags.map((t) => (
+                            <option key={t.tag} value={t.tag}>
+                              {t.tag}（{t.clip_count}）
+                            </option>
+                          ))}
+                        </select>
+                      </>
+                    )}
+
                     {myTags.length > 0 && (
                       <>
                         <p style={styles.filterSectionLabel}>配信者タグ</p>
@@ -1351,6 +1518,10 @@ export default function ClipRanking() {
                       stampCounts={stampCounts[clip.id]}
                       myStamps={myStamps[clip.id]}
                       onToggleStamp={toggleStamp}
+                      tagCounts={clipTagCounts[clip.id]}
+                      myClipTags={myClipTags[clip.id]}
+                      onToggleClipTag={toggleClipTag}
+                      topClipTags={topClipTags}
                       commentsActive={activeCommentClipId === clip.id}
                       onOpenComments={toggleComments}
                       onCommentsUpdate={handleCommentsUpdate}
@@ -1417,6 +1588,10 @@ export default function ClipRanking() {
                     stampCounts={stampCounts[clip.id]}
                     myStamps={myStamps[clip.id]}
                     onToggleStamp={toggleStamp}
+                    tagCounts={clipTagCounts[clip.id]}
+                    myClipTags={myClipTags[clip.id]}
+                    onToggleClipTag={toggleClipTag}
+                    topClipTags={topClipTags}
                     commentsActive={activeCommentClipId === clip.id}
                     onOpenComments={toggleComments}
                     onCommentsUpdate={handleCommentsUpdate}
@@ -1904,6 +2079,54 @@ const styles = {
     fontWeight: 500,
   },
   stampCount: { fontSize: 11, color: "#6B6B78" },
+  tagPopup: {
+    position: "fixed",
+    zIndex: 1000,
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    width: 232,
+    background: "#1C1C26",
+    border: "1px solid #2E2E3A",
+    borderRadius: 10,
+    padding: 10,
+    boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+  },
+  tagChipRow: { display: "flex", flexWrap: "wrap", gap: 6 },
+  tagAddForm: { display: "flex", gap: 6 },
+  tagAddInput: {
+    flex: 1,
+    minWidth: 0,
+    background: "#20202B",
+    border: "1px solid #2E2E3A",
+    borderRadius: 8,
+    padding: "6px 8px",
+    fontSize: 12.5,
+    color: "#EDEDF2",
+  },
+  tagAddBtn: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "#FF4D6D",
+    border: "none",
+    borderRadius: 8,
+    color: "#1C1417",
+    width: 30,
+    flexShrink: 0,
+  },
+  tagSuggestRow: { display: "flex", flexWrap: "wrap", gap: 6, borderTop: "1px solid #24242F", paddingTop: 8 },
+  tagSuggestBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    background: "transparent",
+    border: "1px dashed #2E2E3A",
+    borderRadius: 20,
+    padding: "4px 9px",
+    fontSize: 11.5,
+    color: "#6B6B78",
+  },
   commentBackdrop: {
     position: "fixed",
     inset: 0,
