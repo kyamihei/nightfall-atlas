@@ -54,6 +54,45 @@ function truncateTitle(title: string): string {
   return truncateTo(title, MAX_TITLE_CHARS);
 }
 
+const TWEET_MAX_WEIGHT = 280;
+
+/**
+ * Xの重み付き文字数の簡易近似（半角=1、それ以外（日本語・絵文字等）=2）。実際のtwitter-text
+ * アルゴリズムの完全な再現ではないが、URL等を実際より重く見積もる方向にしかズレないため、
+ * この関数で予算内に収まっていれば実際に超過することはない（安全側）。
+ * クリップ職人ランキング2〜5位のように「何人分載るか」が動的に変わる文面で、都度手計算で
+ * 最悪ケースを試算する代わりに実測して安全に切り詰めるために追加した（2026-09-04）。
+ */
+function tweetWeight(text: string): number {
+  let weight = 0;
+  for (const ch of text) {
+    weight += (ch.codePointAt(0) ?? 0) < 128 ? 1 : 2;
+  }
+  return weight;
+}
+
+const RUNNER_UP_NAME_MAX_CHARS = 10;
+
+/**
+ * クリップ職人ランキング2〜5位を「2位 name／3位 name…」の形で並べた1行を作る。
+ * budgetWeight（残り使える重み）に収まる人数分だけ左から採用し、収まらない下位の順位は
+ * 黙って省略する（0人分になることもある。何位まで載るかがブレるより、桁溢れで投稿自体が
+ * 失敗する方が問題なので、あえて可変にしている）。
+ */
+function buildRunnersUpLine(
+  runnersUp: { creator_name: string }[],
+  budgetWeight: number,
+): string {
+  let line = "";
+  for (let i = 0; i < runnersUp.length; i++) {
+    const entry = `${i + 2}位 ${truncateTo(runnersUp[i].creator_name, RUNNER_UP_NAME_MAX_CHARS)}`;
+    const candidate = line ? `${line}／${entry}` : entry;
+    if (tweetWeight(candidate) > budgetWeight) break;
+    line = candidate;
+  }
+  return line;
+}
+
 /** nowをJSTの壁時計時刻としてUTCフィールドに詰め直したDate（年月日・曜日の算出専用、実時刻としては使わない） */
 function asJstFields(now: Date): Date {
   return new Date(now.getTime() + JST_OFFSET_MS);
@@ -223,7 +262,7 @@ async function buildClipperSpotlightPost(
   const { data, error } = await supabase.rpc("get_top_clippers_by_period", {
     period_start: periodStart,
     period_end: periodEnd,
-    clipper_limit: 1,
+    clipper_limit: 5,
     clipper_offset: 0,
   });
   if (error) {
@@ -236,14 +275,22 @@ async function buildClipperSpotlightPost(
     return null;
   }
 
-  const text = [
-    `今週のクリップ職人ランキング1位は「${top.creator_name}」さん🎬`,
+  // 2〜5位も名前だけ紹介する（2026-09-04追加、ユーザー要望）。人数分の名前で毎回長さが
+  // 変わるため、他の固定文面を組み立てた後に残り予算を計算し、収まる人数分だけ載せる
+  // （tweetWeight/buildRunnersUpLine参照）。
+  const lines = [
+    `今週のクリップ職人ランキング1位は「${truncateTo(top.creator_name, MAX_NAME_CHARS)}」さん🎬`,
     `直近7日間で合計${formatViews(top.total_views)}回視聴のクリップを生み出しています`,
     ``,
     `${BOARD_PITCH}でクリップ職人ランキングをチェック👇`,
     `${SITE_ORIGIN}/clippers/${top.creator_id}`,
-  ].join("\n");
-  return { text, clipId: null };
+  ];
+  const runnersUp = (data as { creator_name: string }[]).slice(1, 5);
+  const remainingBudget = TWEET_MAX_WEIGHT - tweetWeight(lines.join("\n")) - tweetWeight("\n") - 5;
+  const runnersUpLine = buildRunnersUpLine(runnersUp, remainingBudget);
+  if (runnersUpLine) lines.splice(2, 0, runnersUpLine); // 1位の行の直後に挿入
+
+  return { text: lines.join("\n"), clipId: null };
 }
 
 function buildFeatureIntroPost(): { text: string; clipId: null } {
