@@ -243,6 +243,53 @@ export function useClip(clipId: string) {
 }
 
 /**
+ * クリップ詳細ページを開いた瞬間に、そのクリップだけをTwitchへ単発で問い合わせてview_countを
+ * 最新化する（2026-09-05追加、「表示されている視聴回数が実際よりかなり少ない」というユーザー報告
+ * への対応）。refresh-clip-views.ts（毎時バッチ、古い順に最大5000件ずつ処理）は全クリップ
+ * （45万件超）を一巡するのに数十時間かかることがあり、その間は詳細ページの表示が実際の値から
+ * ズレたままになりうる。詳細ページを開いた瞬間だけは個別に最新化することで、バッチの順番待ちとは
+ * 無関係に「実際に人が見ている数字」を常に正確にする。
+ *
+ * Edge Function（refresh-clip-view-count）側で直近1時間以内に同期済みなら何もせず現在値を
+ * 即座に返すため、詳細ページを開くたびに毎回Twitchを叩くことはない。ローカル開発環境では
+ * Edge FunctionのCORSが本番ドメインのみ許可のため必ず失敗するが（「ローカル開発時の既知の制約」
+ * 参照）、あくまで表示の最新化を試みるだけの機能のため、失敗時は静かに無視して現在の表示を続ける。
+ */
+export function useClipViewCountRefresh(clipId: string | null | undefined) {
+  const [refreshedViewCount, setRefreshedViewCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    setRefreshedViewCount(null);
+    if (!clipId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        await ensureAnonymousSession();
+        const token = await getAccessToken();
+        const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/refresh-clip-view-count`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ clip_id: clipId }),
+        });
+        if (cancelled || !res.ok) return;
+        const result = await res.json();
+        if (typeof result.view_count === "number") setRefreshedViewCount(result.view_count);
+      } catch {
+        // 通信失敗時は現在の表示をそのまま維持する（このAPIの失敗をユーザーに見せる必要はない）
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clipId]);
+
+  return refreshedViewCount;
+}
+
+/**
  * 自分のいいね/よくないね状態と、クリップごとの合計カウントを扱うフック。
  * カウントはRPC（下記SQL関数）でまとめて取得し、投票はreactionsテーブルへの
  * upsert/deleteで行う。

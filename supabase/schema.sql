@@ -2051,3 +2051,10 @@ select cron.schedule(
   select refresh_ranking_views();
   $$
 );
+
+-- refresh_ranking_views()は1つのトップレベル文として呼ばれるため、service_roleの
+-- statement_timeoutは内部の6つのREFRESH文の合計時間に対して1回だけ適用される。
+-- admin_dashboard_clip_stats_mv・top_games_mv追加後は実測で約100秒（120秒の枠にほぼ余裕なし）
+-- まで伸び、refresh-clip-views.tsの実行ログで実際にタイムアウト失敗が発生していた
+-- （2026-09-05、「視聴回数の同期」不具合調査で発見）。今後ビューが増えることも踏まえ300秒に引き上げ。
+alter role service_role set statement_timeout = '300s';

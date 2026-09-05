@@ -1,0 +1,15 @@
+-- refresh_ranking_views()のマイグレーション時（20260902...）にservice_roleのstatement_timeoutを
+-- 8秒→120秒へ引き上げた際、「ビューが増えるほど伸びるので、今後さらに追加する場合は時間の余裕を
+-- 見ること」と申し送りしていたが、その後admin_dashboard_clip_stats_mv・top_games_mvが追加されて
+-- 対象ビューが4つ→6つに増え、実測で約100秒（120秒の枠に対してほぼ余裕がない）まで伸びていた。
+--
+-- 実際に本番のrefresh-clip-views.ts実行ログで「ランキング集計ビューの更新に失敗: canceling
+-- statement due to statement timeout」が直近5回中2回発生していることを確認済み（2026-09-05、
+-- 「視聴回数の同期」不具合調査の副産物として発見）。refresh_ranking_views()は1つのトップレベル
+-- 文（select refresh_ranking_views()）としてservice_role権限で呼ばれるため、statement_timeoutは
+-- 内部の6つのREFRESH文の合計時間に対して1回だけ適用される。
+--
+-- 対症療法として今後もビューが増えるたびに踏みうる問題のため、当面のビュー数・増加ペースを
+-- 踏まえて余裕を持たせた300秒に引き上げる。service_role はバックエンド専用の鍵で一般公開されない
+-- ため、長めのタイムアウトを許容しても安全（既存の120秒設定時と同じ判断）。
+alter role service_role set statement_timeout = '300s';

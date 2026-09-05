@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, Heart, ThumbsDown, Star, Send, Flag, Loader2, CornerUpLeft, X, Scissors, MessageSquare, Plus } from "lucide-react";
 import {
   useClip,
+  useClipViewCountRefresh,
   useReactions,
   useFavorites,
   useFavoriteCounts,
@@ -44,6 +45,10 @@ export default function ClipDetail() {
   const { id } = useParams();
   const goBack = useSmartBack("/");
   const { clip, loading, error } = useClip(id);
+  // 詳細ページを開いた瞬間だけTwitchへ単発で問い合わせてview_countを最新化する
+  // （毎時バッチの順番待ちとは無関係に、実際に見られているクリップは常に正確にする）
+  const refreshedViewCount = useClipViewCountRefresh(clip?.id);
+  const displayViewCount = refreshedViewCount ?? clip?.view_count;
   // clip ? [clip.id] : [] を毎レンダー新しい配列として作ると、これに依存する
   // useReactions/useFavorites/useFavoriteCountsのuseEffectが再発火し続け、
   // 非同期取得→setState→再レンダー→配列再生成…の無限ループになる（実際に発生・修正）。
@@ -231,7 +236,7 @@ export default function ClipDetail() {
           {clip.streamer}
         </Link>
         {" ・ "}
-        {clip.game} ・ ▶ {formatViews(clip.view_count)}回視聴 ・ {formatDate(clip.twitch_created_at)}
+        {clip.game} ・ ▶ {formatViews(displayViewCount)}回視聴 ・ {formatDate(clip.twitch_created_at)}
       </p>
       {clip.creator_id && (
         <Link to={`/clippers/${encodeURIComponent(clip.creator_id)}`} style={styles.clipperLine}>

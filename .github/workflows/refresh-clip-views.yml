@@ -14,6 +14,13 @@
 #
 # 事前準備: sync-clips.ymlと同じSecretsを使う（追加設定は不要）
 #   TWITCH_CLIENT_ID / TWITCH_CLIENT_SECRET / SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY
+#
+# 【2026-09-05】既定値を5000→20000に引き上げた。導入直後（view_count_synced_at列を追加した
+# 時点）の全クリップは一律nullのため「一度も同期されていないクリップ」の初期バックログが
+# 数十万件規模になり、5000件/時ではこれを消化しきるまでに数日かかっていた（実際にユーザーから
+# 「視聴回数が実際よりかなり少ない」と報告のあったクリップも、このバックログの順番待ち中だった）。
+# 1回20000件でも実測2〜4倍（約6〜14分程度）で収まりhttp呼び出し回数もTwitch側のレート制限に
+# 対して余裕があるため、この値まで引き上げてバックログの解消を早めている。
 
 name: Refresh Clip View Counts
 
@@ -23,7 +30,7 @@ on:
       max_clips:
         description: "1回の実行で同期する最大クリップ数"
         required: false
-        default: "5000"
+        default: "20000"
 
 jobs:
   refresh:
@@ -43,5 +50,5 @@ jobs:
           TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          VIEW_SYNC_MAX_CLIPS: ${{ github.event.inputs.max_clips || '5000' }}
+          VIEW_SYNC_MAX_CLIPS: ${{ github.event.inputs.max_clips || '20000' }}
         run: deno run --allow-net --allow-env refresh-clip-views.ts
