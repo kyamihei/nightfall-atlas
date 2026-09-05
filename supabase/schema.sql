@@ -2058,3 +2058,9 @@ select cron.schedule(
 -- まで伸び、refresh-clip-views.tsの実行ログで実際にタイムアウト失敗が発生していた
 -- （2026-09-05、「視聴回数の同期」不具合調査で発見）。今後ビューが増えることも踏まえ300秒に引き上げ。
 alter role service_role set statement_timeout = '300s';
+
+-- 毎日の自動投稿にトレンドランキング紹介を追加するのに伴い、post_typeのCHECK制約に
+-- 'trending'を許可する（2026-09-05追加）。
+alter table daily_ranking_posts drop constraint daily_ranking_posts_post_type_check;
+alter table daily_ranking_posts add constraint daily_ranking_posts_post_type_check
+  check (post_type in ('ranking', 'trending', 'clipper_spotlight', 'feature_intro'));

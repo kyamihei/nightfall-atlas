@@ -4,9 +4,16 @@
 // 相談への対応）。「日本唯一の掲示板機能があるTwitchクリップサイト」「クリップ職人の紹介」
 // 「お気に入りで自分だけのクリップコレクションが作れる」の3点を宣伝したいという要望を受け、
 // JSTの曜日でテーマをローテーションする（同じ形式の投稿ばかりだと飽きられるのを避ける狙い）。
-//   月〜金: 前日（JST 0:00〜24:00）に一番視聴されたクリップを「問いかけ型」で紹介
-//   土: 直近7日間のクリップ職人ランキング1位を紹介
+//   月・水・金: 前日（JST 0:00〜24:00）に視聴回数の多かったクリップ1〜3位を「問いかけ型」で紹介
+//   火・木: 直近72時間のトレンドランキング（視聴速度順）1〜3位を紹介（2026-09-05追加、
+//           「トレンドランキングも自動ポストしてほしい」というユーザー要望への対応）
+//   土: 直近7日間のクリップ職人ランキング1位（+2〜5位を名前だけ）を紹介
 //   日: お気に入り（マイクリップコレクション）機能の紹介
+// ranking/trendingはいずれも1位のみ文章で詳しく紹介し、2〜3位は名前だけの短い1行に留める
+// （clipper_spotlightの「1位は詳しく、2位以降は名前だけ」という構成を踏襲、280文字に収める
+// ため）。1〜3位（clipper_spotlightは1〜5位）の詳細はサイトの雰囲気が伝わるランキング画像
+// （buildRankingCard）に添付する形で補う（2026-09-05追加、「職人ランキングみたいな画像を
+// 生成して載せてほしい」というユーザー要望への対応）。
 // クリップ/クリップ職人の個別ページには動的OGP（api/og/*.js）が効くため、リンクを貼るだけで
 // サムネイル付きのカードがXのタイムライン上に表示される。
 //
@@ -385,6 +392,20 @@ function drawGlowBlob(
   canvas.composite(blob, Math.round(cx - radius), Math.round(cy - radius));
 }
 
+/**
+ * カード1行分。クリップ職人ランキング（丸いアバター）とクリップランキング（長方形の
+ * サムネイル）の両方に対応できるよう、画像の切り抜き形状（imageShape）を持たせている
+ * （2026-09-05、「日次/トレンドランキングにも画像を付けたい」という要望で
+ * buildClipperRankingCardから一般化）。
+ */
+interface CardRow {
+  rank: number;
+  imageUrl: string | null;
+  imageShape: "circle" | "rect";
+  primaryText: string;
+  secondaryText: string;
+}
+
 interface ClipperCardEntry {
   creator_name: string;
   total_views: number;
@@ -392,19 +413,18 @@ interface ClipperCardEntry {
 }
 
 /**
- * 週間クリップ職人ランキング（1〜5人）をサイトのWeeklyClipperBoardを模したカード画像にする。
- * フォント取得・アバター取得はそれぞれtry/catchし、1人分のアバター取得に失敗しても
- * （Twitch側の画像が削除済み等）他の行やテキストは表示を続ける。呼び出し側
- * （buildClipperSpotlightPost）でさらに全体をtry/catchしており、この関数自体が失敗しても
- * 投稿はテキストのみで続行される。
+ * ランキング（1〜5行）をサイトのWeeklyClipperBoard/ClipRankingを模したカード画像にする。
+ * 画像取得はtry/catchし、1行分の画像取得に失敗しても（Twitch側の画像が削除済み等）
+ * 他の行やテキストは表示を続ける。呼び出し側でさらに全体をtry/catchしており、
+ * この関数自体が失敗しても投稿はテキストのみで続行される。
  */
-async function buildClipperRankingCard(clippers: ClipperCardEntry[]): Promise<Uint8Array> {
+async function buildRankingCard(heading: string, rows: CardRow[]): Promise<Uint8Array> {
   const fontRes = await fetch(CARD_FONT_URL);
   if (!fontRes.ok) throw new Error(`カード用フォントの取得に失敗しました（${fontRes.status}）`);
   const fontBytes = new Uint8Array(await fontRes.arrayBuffer());
 
-  // 人数分だけの高さにし、5人に満たない週でも下に無駄な余白ができないようにする
-  const height = CARD_ROW_TOP + clippers.length * CARD_ROW_HEIGHT + 70;
+  // 行数分だけの高さにし、5行に満たない場合でも下に無駄な余白ができないようにする
+  const height = CARD_ROW_TOP + rows.length * CARD_ROW_HEIGHT + 70;
   const canvas = new Image(CARD_WIDTH, height);
   canvas.fill((x: number, y: number) => {
     const t = (x / CARD_WIDTH + y / height) / 2;
@@ -417,16 +437,15 @@ async function buildClipperRankingCard(clippers: ClipperCardEntry[]): Promise<Ui
 
   const brand = await cardText(fontBytes, "クリスレ", 32, 255, 77, 109);
   canvas.composite(brand, 44, 38);
-  const title = await cardText(fontBytes, "週間クリップ職人ランキング", 50, 237, 237, 242);
+  const title = await cardText(fontBytes, heading, 50, 237, 237, 242);
   canvas.composite(title, 44, 80);
 
   const panelX = 40;
   const panelW = CARD_WIDTH - 80;
   const panelH = 80;
 
-  for (let i = 0; i < clippers.length; i++) {
-    const c = clippers[i];
-    const rank = i + 1;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
     const rowY = CARD_ROW_TOP + i * CARD_ROW_HEIGHT;
 
     const panel = new Image(panelW, panelH);
@@ -434,31 +453,38 @@ async function buildClipperRankingCard(clippers: ClipperCardEntry[]): Promise<Ui
     panel.roundCorners(16);
     canvas.composite(panel, panelX, rowY - 6);
 
-    const [rr, rg, rb] = CARD_RANK_COLORS[rank] ?? [138, 138, 153];
-    const rankImg = await cardText(fontBytes, String(rank), 42, rr, rg, rb);
+    const [rr, rg, rb] = CARD_RANK_COLORS[row.rank] ?? [138, 138, 153];
+    const rankImg = await cardText(fontBytes, String(row.rank), 42, rr, rg, rb);
     canvas.composite(rankImg, panelX + 24, rowY + 10);
 
-    if (c.profile_image_url) {
+    if (row.imageUrl) {
       try {
-        const avatarRes = await fetch(c.profile_image_url);
-        if (avatarRes.ok) {
-          const avatar = await Image.decode(new Uint8Array(await avatarRes.arrayBuffer()));
-          avatar.resize(60, 60);
-          avatar.cropCircle();
-          canvas.composite(avatar, panelX + 100, rowY + 10);
+        const imgRes = await fetch(row.imageUrl);
+        if (imgRes.ok) {
+          const img = await Image.decode(new Uint8Array(await imgRes.arrayBuffer()));
+          if (row.imageShape === "circle") {
+            img.resize(60, 60);
+            img.cropCircle();
+            canvas.composite(img, panelX + 100, rowY + 10);
+          } else {
+            img.resize(96, 54);
+            img.roundCorners(8);
+            canvas.composite(img, panelX + 100, rowY + 13);
+          }
         }
       } catch (e) {
-        console.warn(`${c.creator_name}のアバター取得に失敗したため省略します:`, e);
+        console.warn(`「${row.primaryText}」の画像取得に失敗したため省略します:`, e);
       }
     }
 
-    const nameImg = await cardText(fontBytes, c.creator_name, 30, 237, 237, 242);
-    canvas.composite(nameImg, panelX + 180, rowY + 2);
-    const viewsImg = await cardText(fontBytes, `${formatViews(c.total_views)}回視聴`, 19, 151, 151, 166);
-    canvas.composite(viewsImg, panelX + 180, rowY + 46);
+    const textX = panelX + (row.imageShape === "rect" ? 216 : 180);
+    const primaryImg = await cardText(fontBytes, row.primaryText, 28, 237, 237, 242);
+    canvas.composite(primaryImg, textX, rowY + 2);
+    const secondaryImg = await cardText(fontBytes, row.secondaryText, 19, 151, 151, 166);
+    canvas.composite(secondaryImg, textX, rowY + 46);
   }
 
-  const footerY = CARD_ROW_TOP + clippers.length * CARD_ROW_HEIGHT + 20;
+  const footerY = CARD_ROW_TOP + rows.length * CARD_ROW_HEIGHT + 20;
   canvas.drawBox(panelX, footerY, panelW, 3, cardColor(255, 77, 109, 200));
   const urlImg = await cardText(fontBytes, "kurisure.jp", 22, 151, 151, 166);
   canvas.composite(urlImg, panelX, footerY + 16);
@@ -466,14 +492,48 @@ async function buildClipperRankingCard(clippers: ClipperCardEntry[]): Promise<Ui
   return await canvas.encode();
 }
 
-type PostType = "ranking" | "clipper_spotlight" | "feature_intro";
+type PostType = "ranking" | "trending" | "clipper_spotlight" | "feature_intro";
 
 const BOARD_PITCH = "コメントもできるTwitchクリップの掲示板「クリスレ」";
+const RANKING_IMAGE_LIMIT = 3; // 「ランキングも3位まで」（2026-09-05、ユーザー要望）
 
 interface BuiltPost {
   text: string;
   clipId: string | null;
   imageBytes: Uint8Array | null;
+}
+
+interface ClipRankEntry {
+  id: string;
+  title: string;
+  streamer: string;
+  view_count: number;
+  thumbnail_url: string | null;
+  creator_id?: string | null;
+  creator_name?: string | null;
+}
+
+/**
+ * 1位はタイトル・配信者名・視聴回数まで詳しく、2〜3位は配信者名だけの短い1行で紹介する
+ * 文面を組み立てる（buildClipperSpotlightPostの「1位は詳しく、2位以降は名前だけ」という
+ * 構成をクリップランキングにも流用）。詳細はすべて添付画像（buildRankingCard）に載るため、
+ * テキスト側は280文字に収まる範囲で簡潔にするための設計。
+ */
+function buildRunnersUpClipLine(runnersUp: ClipRankEntry[], budgetWeight: number): string {
+  return buildRunnersUpLine(
+    runnersUp.map((c) => ({ creator_name: c.streamer })),
+    budgetWeight,
+  );
+}
+
+function clipRankRows<T extends ClipRankEntry>(clips: T[], secondaryText: (c: T) => string): CardRow[] {
+  return clips.map((c, i) => ({
+    rank: i + 1,
+    imageUrl: c.thumbnail_url,
+    imageShape: "rect" as const,
+    primaryText: truncateTitle(c.title),
+    secondaryText: secondaryText(c),
+  }));
 }
 
 async function buildRankingPost(
@@ -483,18 +543,19 @@ async function buildRankingPost(
   const { start, end, dateStr } = yesterdayJstRangeUtc(new Date());
   const { data: topClips, error } = await supabase
     .from("clips")
-    .select("id, title, streamer, view_count, creator_id, creator_name")
+    .select("id, title, streamer, view_count, creator_id, creator_name, thumbnail_url")
     .neq("id", "__general_thread__")
     .gte("twitch_created_at", start)
     .lt("twitch_created_at", end)
     .order("view_count", { ascending: false })
-    .limit(1);
+    .limit(RANKING_IMAGE_LIMIT);
 
   if (error) {
     console.error("前日のランキング取得に失敗しました:", error.message);
     Deno.exit(1);
   }
-  const top = topClips?.[0];
+  const clips = (topClips ?? []) as ClipRankEntry[];
+  const top = clips[0];
   if (!top) {
     console.log(`${dateStr}分のクリップが見つからなかったため、投稿をスキップします。`);
     return null;
@@ -504,9 +565,9 @@ async function buildRankingPost(
   // クレジット行として添える。Twitch側で作者が特定できなかった古いクリップはcreator_idが
   // '__unknown__'になっている（詳細はCLAUDE.md「クリップ職人ランキング」節）ため、その場合は省略する。
   const hasCreator = top.creator_id && top.creator_id !== "__unknown__" && top.creator_name;
-  const creatorLine = hasCreator ? [`✂️ ${truncateTo(top.creator_name, MAX_NAME_CHARS)}さんが作成`] : [];
+  const creatorLine = hasCreator ? [`✂️ ${truncateTo(top.creator_name!, MAX_NAME_CHARS)}さんが作成`] : [];
 
-  const text = [
+  const lines = [
     `昨日のTwitchクリップ、一番見られたのは誰のクリップだったと思う？`,
     ``,
     `正解は…${truncateTo(top.streamer, MAX_NAME_CHARS)}さん「${truncateTitle(top.title)}」（${formatViews(top.view_count)}回視聴）`,
@@ -514,8 +575,77 @@ async function buildRankingPost(
     ``,
     `${BOARD_PITCH}で続きをチェック👇`,
     `${SITE_ORIGIN}/clips/${top.id}`,
-  ].join("\n");
-  return { text, clipId: top.id, imageBytes: null };
+  ];
+  // 2〜3位（2026-09-05追加、「ランキングも3位まで出力して」というユーザー要望）。
+  // 詳細は添付画像に載るため、テキストは配信者名だけの短い1行に留める。
+  const runnersUp = clips.slice(1, RANKING_IMAGE_LIMIT);
+  const remainingBudget = TWEET_MAX_WEIGHT - tweetWeight(lines.join("\n")) - tweetWeight("\n") - 5;
+  const runnersUpLine = buildRunnersUpClipLine(runnersUp, remainingBudget);
+  // creatorLineの有無で後続行のインデックスがずれるため、位置を動的に計算する
+  // （creatorLineの直後・次の空行の直前に挿入）
+  if (runnersUpLine) lines.splice(3 + creatorLine.length, 0, runnersUpLine);
+
+  // サイトの雰囲気が伝わるランキング画像を添付する（2026-09-05追加、ユーザー要望）。
+  // 生成に失敗しても投稿自体は諦めない設計（フォント/サムネイル取得先の一時的な障害等を想定し、
+  // その場合はテキストのみで投稿を続行する。main()側でもアップロード自体の失敗を別途
+  // テキストのみ投稿へフォールバックさせている、二重の保険）。
+  let imageBytes: Uint8Array | null = null;
+  try {
+    const rows = clipRankRows(clips, (c) => `${c.streamer}・${formatViews(c.view_count)}回視聴`);
+    imageBytes = await buildRankingCard("昨日のクリップランキング", rows);
+  } catch (e) {
+    console.warn("ランキング画像の生成に失敗したため、テキストのみで投稿します:", e);
+  }
+
+  return { text: lines.join("\n"), clipId: top.id, imageBytes };
+}
+
+async function buildTrendingPost(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+): Promise<BuiltPost | null> {
+  const { data, error } = await supabase.rpc("get_trending_clips", {
+    clip_limit: RANKING_IMAGE_LIMIT,
+    lookback_hours: 72,
+  });
+  if (error) {
+    console.error("トレンドランキングの取得に失敗しました:", error.message);
+    Deno.exit(1);
+  }
+  const clips = (data ?? []) as (ClipRankEntry & { views_per_hour: number })[];
+  const top = clips[0];
+  if (!top) {
+    console.log("トレンドランキングが空だったため、投稿をスキップします。");
+    return null;
+  }
+
+  const hasCreator = top.creator_id && top.creator_id !== "__unknown__" && top.creator_name;
+  const creatorLine = hasCreator ? [`✂️ ${truncateTo(top.creator_name!, MAX_NAME_CHARS)}さんが作成`] : [];
+
+  const lines = [
+    `今、急上昇中のTwitchクリップはこれ🔥`,
+    ``,
+    `${truncateTo(top.streamer, MAX_NAME_CHARS)}さん「${truncateTitle(top.title)}」が1時間あたり${formatViews(Math.round(top.views_per_hour))}回視聴のペースで伸びています`,
+    ...creatorLine,
+    ``,
+    `${BOARD_PITCH}のトレンドランキングをチェック👇`,
+    `${SITE_ORIGIN}/?view=trending`,
+  ];
+  // 2〜3位（月〜金のランキング投稿と同じ「1位は詳しく、2位以降は名前だけ」構成）
+  const runnersUp = clips.slice(1, RANKING_IMAGE_LIMIT);
+  const remainingBudget = TWEET_MAX_WEIGHT - tweetWeight(lines.join("\n")) - tweetWeight("\n") - 5;
+  const runnersUpLine = buildRunnersUpClipLine(runnersUp, remainingBudget);
+  if (runnersUpLine) lines.splice(3 + creatorLine.length, 0, runnersUpLine);
+
+  let imageBytes: Uint8Array | null = null;
+  try {
+    const rows = clipRankRows(clips, (c) => `1時間あたり${formatViews(Math.round(c.views_per_hour))}回視聴`);
+    imageBytes = await buildRankingCard("トレンドランキング", rows);
+  } catch (e) {
+    console.warn("トレンドランキング画像の生成に失敗したため、テキストのみで投稿します:", e);
+  }
+
+  return { text: lines.join("\n"), clipId: top.id, imageBytes };
 }
 
 async function buildClipperSpotlightPost(
@@ -563,9 +693,14 @@ async function buildClipperSpotlightPost(
   // アップロード自体の失敗を別途テキストのみ投稿へフォールバックさせている、二重の保険）。
   let imageBytes: Uint8Array | null = null;
   try {
-    imageBytes = await buildClipperRankingCard(
-      (data as ClipperCardEntry[]).slice(0, 5),
-    );
+    const rows: CardRow[] = (data as ClipperCardEntry[]).slice(0, 5).map((c, i) => ({
+      rank: i + 1,
+      imageUrl: c.profile_image_url,
+      imageShape: "circle" as const,
+      primaryText: truncateTo(c.creator_name, MAX_NAME_CHARS),
+      secondaryText: `${formatViews(c.total_views)}回視聴`,
+    }));
+    imageBytes = await buildRankingCard("週間クリップ職人ランキング", rows);
   } catch (e) {
     console.warn("クリップ職人ランキング画像の生成に失敗したため、テキストのみで投稿します:", e);
   }
@@ -589,7 +724,16 @@ async function main() {
   const now = new Date();
   const dateStr = todayJstDateString(now);
   const weekday = jstWeekday(now); // 0=日 1=月 ... 6=土
-  const postType: PostType = weekday === 6 ? "clipper_spotlight" : weekday === 0 ? "feature_intro" : "ranking";
+  // 月・水・金=前日ランキング、火・木=トレンドランキング、土=クリップ職人、日=機能紹介
+  // （2026-09-05、トレンドランキング投稿を追加してより細かくローテーションするよう変更）
+  const postType: PostType =
+    weekday === 6
+      ? "clipper_spotlight"
+      : weekday === 0
+        ? "feature_intro"
+        : weekday === 2 || weekday === 4
+          ? "trending"
+          : "ranking";
 
   // 二重投稿防止（pg_cronのwebhookが何らかの理由で重複しても同じ日に2回投稿しない）
   const { data: existing } = await supabase
@@ -605,16 +749,18 @@ async function main() {
   const built =
     postType === "ranking"
       ? await buildRankingPost(supabase)
-      : postType === "clipper_spotlight"
-        ? await buildClipperSpotlightPost(supabase)
-        : buildFeatureIntroPost();
+      : postType === "trending"
+        ? await buildTrendingPost(supabase)
+        : postType === "clipper_spotlight"
+          ? await buildClipperSpotlightPost(supabase)
+          : buildFeatureIntroPost();
   if (!built) return;
 
   console.log(`投稿タイプ: ${postType}\n投稿内容:\n${built.text}`);
 
   // 画像付き投稿は、アップロードそのものの失敗（X側の一時的な障害・仕様変更等）も
-  // テキストのみの投稿へフォールバックさせる（画像機能の不具合で毎週の投稿自体が
-  // 止まってしまうことを避けるため、buildClipperRankingCard内のtry/catchとは別に
+  // テキストのみの投稿へフォールバックさせる（画像機能の不具合で毎回の投稿自体が
+  // 止まってしまうことを避けるため、buildRankingCard呼び出し側のtry/catchとは別に
   // ここでも保険をかけている）。
   let tweetId: string;
   if (built.imageBytes) {
