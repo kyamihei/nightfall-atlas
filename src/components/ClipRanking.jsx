@@ -69,6 +69,24 @@ function isSameDay(a, b) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
+// 日別タブで選択中の日付をURLの?dayクエリ（ローカル日付のYYYY-MM-DD）に保存するための変換。
+// toISOString()はUTC基準になり日付がズレうるため使わず、ローカルの年月日フィールドから直接
+// 文字列化・復元する（「毎日のランキングをXへ自動投稿」節で踏んだのと同種のJST日付境界の罠を避けるため）。
+function formatDayParam(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function parseDayParam(value) {
+  const match = value ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(value) : null;
+  if (!match) return null;
+  const [, y, m, d] = match;
+  const date = new Date(Number(y), Number(m) - 1, Number(d));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 const TAG_COLORS = {
   coral: { bg: "#3A241D", text: "#F0997B" },
   amber: { bg: "#3A2E14", text: "#EF9F27" },
@@ -932,8 +950,15 @@ function SkeletonRow({ delay }) {
 const PAGE_SIZE = 20;
 
 export default function ClipRanking() {
-  const [period, setPeriod] = useState("day"); // all | year | month | day
-  const [selectedDay, setSelectedDay] = useState(() => new Date());
+  // 期間タブ（全期間/今年/今月/日別）・日別選択中の日付をURLの?period/?dayクエリにも同期する
+  // （2026-09-05、「日別9/4を見ていてブラウザバックすると全期間に戻ってしまう」不具合対応）。
+  // activeView（ランキング/トレンドタブ）で既に使っている「stateを真実の源にしつつURLへ反映し、
+  // 初期stateはマウント時にURLから復元する」パターンをそのまま踏襲している。
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialPeriodParam = searchParams.get("period");
+  const initialPeriod = PERIOD_TABS.some((t) => t.value === initialPeriodParam) ? initialPeriodParam : "day";
+  const [period, setPeriod] = useState(initialPeriod);
+  const [selectedDay, setSelectedDay] = useState(() => parseDayParam(searchParams.get("day")) ?? new Date());
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState("views"); // views | newest | likes | comments
   const [tagFilter, setTagFilter] = useState(""); // ""=絞り込みなし。自分で付けた配信者タグで絞り込む
@@ -1056,7 +1081,6 @@ export default function ClipRanking() {
   // 戻ってしまう（活性タブがコンポーネント内のstateだけで管理されており、詳細ページへの遷移で
   // アンマウントされると失われるため）不具合の対応（2026-09-04）。
   const VIEW_TABS = ["ranking", "trending"];
-  const [searchParams, setSearchParams] = useSearchParams();
   // 配信者名検索はヘッダー（Header.jsx）側のstateから?qクエリ経由で受け取る
   // （ヘッダーはコンポーネントツリー上ここの親ではないためpropsで渡せない、2026-09-04）。
   const searchQuery = searchParams.get("q") ?? "";
@@ -1115,12 +1139,33 @@ export default function ClipRanking() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [filterOpen]);
 
+  // 期間・日別選択をstateと同時にURLへも反映する（activeViewの?viewクエリ同期と同じパターン）。
+  // 日別以外はday自体が無意味なため、periodがdayでなくなったらdayクエリは消す。
+  function syncPeriodParams(nextPeriod, nextDay) {
+    setSearchParams(
+      (params) => {
+        const next = new URLSearchParams(params);
+        if (nextPeriod === "day") {
+          next.delete("period");
+          next.set("day", formatDayParam(nextDay));
+        } else {
+          next.set("period", nextPeriod);
+          next.delete("day");
+        }
+        return next;
+      },
+      { replace: true },
+    );
+  }
+
   function handlePeriodSelect(value) {
     setPeriod(value);
+    syncPeriodParams(value, selectedDay);
   }
 
   function handleDaySelect(d) {
     setSelectedDay(d);
+    syncPeriodParams(period, d);
   }
 
   const { results: broadcasterResults, searching: broadcasterSearching } = useBroadcasterSearch(searchQuery);
