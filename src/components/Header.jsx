@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
-  Users, Scissors, Search, MessageSquare, Hash, ListChecks, Smile, Star, Award, LogOut, UserPlus, ExternalLink, HelpCircle,
+  Users, Scissors, Search, MessageSquare, Hash, ListChecks, Smile, Star, Award, LogOut, UserPlus, ExternalLink, HelpCircle, Menu, X,
 } from "lucide-react";
 import { supabase } from "../lib/supabase-client";
 import { useMembership } from "../lib/use-clip-ranking";
@@ -28,11 +28,17 @@ export default function Header() {
   const isHome = location.pathname === "/";
 
   const [searchInput, setSearchInput] = useState(() => new URLSearchParams(location.search).get("q") ?? "");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // ブラウザの戻る/進む等、自分の入力以外の理由でURLの?qが変わった場合にも追従させる
   useEffect(() => {
     setSearchInput(new URLSearchParams(location.search).get("q") ?? "");
   }, [location.pathname, location.search]);
+
+  // ページ遷移したら開いたままにしない（スマホのハンバーガーメニュー）
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [location.pathname]);
 
   const {
     memberNumber,
@@ -76,20 +82,37 @@ export default function Header() {
           transform: translateY(-1px);
         }
         .cv-search-box { margin-left: auto; }
+        .cv-menu-toggle { display: none; }
+        .cv-nav-links { display: flex; }
         @media (max-width: 640px) {
-          .cv-header-top { flex-direction: column; align-items: flex-start; }
-          .cv-nav-links { justify-content: flex-start; }
+          .cv-header-top { flex-direction: column; align-items: stretch; }
+          .cv-header-row { width: 100%; justify-content: space-between; }
+          .cv-menu-toggle { display: inline-flex; align-items: center; justify-content: center; }
+          .cv-nav-links { display: none; flex-direction: column; align-items: stretch; width: 100%; justify-content: flex-start; }
+          .cv-nav-links.cv-nav-links-open { display: flex; }
+          .cv-nav-links.cv-nav-links-open > * { width: 100%; }
           .cv-search-box { width: 100%; margin-left: 0; }
         }
       `}</style>
 
       <div className="cv-header-top" style={styles.headerTop}>
-        <Link to="/" style={styles.h1Link}>
-          <img src="/favicon.ico" alt="" style={styles.h1Icon} />
-          <span style={styles.h1}>クリスレ</span>
-        </Link>
+        <div className="cv-header-row" style={styles.headerRow}>
+          <Link to="/" style={styles.h1Link}>
+            <img src="/favicon.ico" alt="" style={styles.h1Icon} />
+            <span style={styles.h1}>クリスレ</span>
+          </Link>
+          <button
+            type="button"
+            className="cv-menu-toggle"
+            style={styles.menuToggle}
+            onClick={() => setMobileMenuOpen((open) => !open)}
+            aria-label={mobileMenuOpen ? "メニューを閉じる" : "メニューを開く"}
+          >
+            {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+          </button>
+        </div>
 
-        <nav className="cv-nav-links" style={styles.headerLinks}>
+        <nav className={`cv-nav-links${mobileMenuOpen ? " cv-nav-links-open" : ""}`} style={styles.headerLinks}>
           <Link to="/guide" className="cv-nav-link" style={styles.navLink}>
             <HelpCircle size={15} />
             サイトの使い方
@@ -188,6 +211,15 @@ const styles = {
     padding: "16px 32px",
   },
   headerTop: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: 16 },
+  headerRow: { display: "flex", alignItems: "center", gap: 12 },
+  menuToggle: {
+    background: "#1C1C26",
+    border: "1px solid #2E2E3A",
+    borderRadius: 8,
+    padding: 8,
+    color: "#C4C4D0",
+    flexShrink: 0,
+  },
   h1Link: {
     display: "flex",
     alignItems: "center",
@@ -203,7 +235,7 @@ const styles = {
     letterSpacing: 0.5,
     color: "#EDEDF2",
   },
-  headerLinks: { display: "flex", flexWrap: "wrap", gap: 8 },
+  headerLinks: { flexWrap: "wrap", gap: 8 },
   navLink: {
     display: "inline-flex",
     alignItems: "center",
