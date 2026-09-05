@@ -1972,6 +1972,53 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   既存パターンの流用でありリスクは低いと判断）。ログイン画面自体は新コード込みで
   エラー無く表示されることは確認した。
 
+## 視聴回数の同期が実際より大きくズレる不具合の調査・対応（2026-09-05追加）
+
+- **ユーザー報告**: 特定のクリップ詳細ページの表示（556回視聴）が実際のTwitch上の値
+  （約5,926回視聴）と大きくズレている。
+- **調査**: 該当クリップは`view_count_synced_at`が`null`＝一度もview_count再同期の対象に
+  なっていなかった。DB全体を確認したところ、**全447,935件中257,903件（約58%）が
+  一度も同期されていない**状態だった。原因は、`refresh-clip-views.ts`（毎時5,000件を
+  `view_count_synced_at`が古い順＝nullを最優先で処理するラウンドロビン）自体は
+  正常に稼働していた（`gh run list`で直近の実行がすべて成功していることを確認）ものの、
+  9/1の初回一括バックフィル（約39万件、`view_count_synced_at`列の導入前のデータ）による
+  巨大な初期バックログを5,000件/時では消化しきれておらず、残り約2日はかかる見込みだった。
+  ご指摘のクリップはその「順番待ちの列」にまだ並んでいただけだった。
+  - 副次的に、`refresh_ranking_views()`（6つのマテリアライズドビューを1つのトップレベル文
+    として`select refresh_ranking_views()`でまとめてrefreshする）が、直近の実行ログ5回中2回
+    `canceling statement due to statement timeout`で失敗していることも発見した。実測したところ
+    約100秒かかっており、service_roleのstatement_timeout（120秒、「クリップ職人ランキング」節で
+    4ビュー分を想定して設定した値）に対してほぼ余裕がない状態だった（その後
+    `admin_dashboard_clip_stats_mv`・`top_games_mv`が追加され6ビューに増えたため）。
+    「今後さらに追加する場合は時間の余裕を見ること」という当時の申し送り通りの事態が実際に
+    発生していた形。
+- **対応**（3点、ユーザーに提案し「順番はお任せします」で全て実施）:
+  1. `refresh-clip-views.yml`の`VIEW_SYNC_MAX_CLIPS`既定値を5,000→**20,000**に引き上げ
+     （1回の実行時間は数分伸びる程度で、バックログ解消をおよそ2日→半日程度に短縮）。
+  2. **クリップ詳細ページを開いた瞬間に、そのクリップだけを個別に最新化する遅延同期**を新設。
+     新規Edge Function`refresh-clip-view-count`（`clip_id`を受け取り、`view_count_synced_at`が
+     1時間以内ならTwitchへ問い合わせず現在値をそのまま返し、それより古ければ単発でTwitch
+     Get Clipsを叩いて`bulk_update_clip_views`（既存の同期RPCを再利用）で更新する）と、
+     それを呼ぶ`useClipViewCountRefresh`フック（`use-clip-ranking.ts`）を追加。
+     `ClipDetail.jsx`だけに配線し（`GeneralThread.jsx`も`useClip`を使うが、そちらは
+     クリップタイトル参照のみで視聴回数を表示しないため対象外）、バッチの順番待ちとは
+     無関係に「実際に人が見ているクリップ」は開いた瞬間に正確な値へ更新される。
+     - 認証は他のEdge Function同様Authorizationヘッダーの匿名セッションJWTを
+       `auth.getUser(jwt)`で検証するが、書き込みクライアント自体はヘッダー上書きしない
+       正真正銘のservice roleとして作成している（「本番でハマった重要なRLSの罠」節の
+       教訓を踏襲）。
+     - 本番相手にcurlで実地検証済み（ご指摘のクリップに対して`{"view_count":5928,
+       "refreshed":true}`→DBの`view_count`/`view_count_synced_at`が実際に更新済み。
+       1時間以内の再呼び出しは`{"refreshed":false}`で即座に返りTwitchを叩かないことも確認）。
+  3. `alter role service_role set statement_timeout`を120秒→**300秒**に引き上げる
+     マイグレーション（`20260905010000_increase_service_role_statement_timeout.sql`）を
+     本番へ適用。今後ビューが増えた場合の余裕を持たせた。
+- **今後の教訓**: `refresh_ranking_views()`のようにREFRESH文を複数まとめたplpgsql関数は、
+  1つのトップレベル文として呼ばれるためstatement_timeoutは合計時間に対して1回だけ適用される。
+  ビューを追加するたびに合計時間が伸びるため、追加時は必ず実測してタイムアウトに余裕が
+  あるか確認すること（EXPLAIN ANALYZEではなく実行時間の実測でよい、`select
+  refresh_ranking_views();`を直接叩けば確認できる）。
+
 # ステアリング
 
 - git commitを行う際は、同じタイミングでリモート（origin）へのpushも必ず行うこと。ユーザーから別途pushを依頼されるのを待たない。
