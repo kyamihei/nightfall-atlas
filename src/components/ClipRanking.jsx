@@ -760,27 +760,15 @@ function CommentSidebar({
 /**
  * 「最近できたばかりのサイトだと視聴者に伝え、会員登録の早さで古参感を演出したい」という
  * 要望で追加（2026-09-04）。トップページに来て最初に目に入るヘッダー直上に表示する。
- * ×で閉じてもそのセッション中だけ非表示にし、次回サイト訪問時（再読み込み含む）には
- * 再度表示されるよう、閉じた状態はlocalStorage等に保存せずコンポーネントのstateのみで管理する。
+ * 常に表示し続けて登録を促すため、閉じるボタンは設けていない（2026-09-05変更、ユーザー指示）。
  */
 function NewSiteBanner() {
-  const [dismissed, setDismissed] = useState(false);
-
-  function handleDismiss() {
-    setDismissed(true);
-  }
-
-  if (dismissed) return null;
-
   return (
     <div style={styles.newSiteBanner}>
       <Sparkles size={16} style={styles.newSiteBannerIcon} />
       <span style={styles.newSiteBannerText}>
         クリスレは2026年9月にスタートしたばかりの新しいサイトです。会員登録が早いほど会員番号が若い数字に！お早めに！
       </span>
-      <button onClick={handleDismiss} style={styles.newSiteBannerClose} aria-label="閉じる">
-        <X size={14} />
-      </button>
     </div>
   );
 }
@@ -1691,15 +1679,6 @@ const styles = {
   },
   newSiteBannerIcon: { flexShrink: 0, color: "#FF4D6D" },
   newSiteBannerText: { flex: 1, fontSize: 13, color: "#EDEDF2", lineHeight: 1.5 },
-  newSiteBannerClose: {
-    flexShrink: 0,
-    display: "flex",
-    alignItems: "center",
-    background: "none",
-    border: "none",
-    color: "#9797A6",
-    padding: 4,
-  },
   tab: {
     background: "transparent",
     border: "1px solid #2E2E3A",
