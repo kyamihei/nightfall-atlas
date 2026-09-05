@@ -757,31 +757,17 @@ function CommentSidebar({
   );
 }
 
-const NEW_SITE_BANNER_DISMISSED_KEY = "cv-new-site-banner-dismissed";
-
 /**
- * 「最近できたばかりのサイトだと視聴者に伝え、今のうちに使えば古参になれるかもという
- * 承認欲求に訴えたい」という要望で追加（2026-09-04）。トップページに来て最初に目に入る
- * ヘッダー直上に表示する。一度閉じたら二度と出さないよう閉じた状態をlocalStorageに保存する
- * （お気に入り/配信者タグ等と違いアカウントに紐付ける必要が薄い、端末ごとの表示上の好みのため
- * `useActivityFeedPrefs`と同じ考え方でlocalStorageのみで完結させている）。
+ * 「最近できたばかりのサイトだと視聴者に伝え、会員登録の早さで古参感を演出したい」という
+ * 要望で追加（2026-09-04）。トップページに来て最初に目に入るヘッダー直上に表示する。
+ * ×で閉じてもそのセッション中だけ非表示にし、次回サイト訪問時（再読み込み含む）には
+ * 再度表示されるよう、閉じた状態はlocalStorage等に保存せずコンポーネントのstateのみで管理する。
  */
 function NewSiteBanner() {
-  const [dismissed, setDismissed] = useState(() => {
-    try {
-      return localStorage.getItem(NEW_SITE_BANNER_DISMISSED_KEY) === "1";
-    } catch {
-      return false;
-    }
-  });
+  const [dismissed, setDismissed] = useState(false);
 
   function handleDismiss() {
     setDismissed(true);
-    try {
-      localStorage.setItem(NEW_SITE_BANNER_DISMISSED_KEY, "1");
-    } catch {
-      // プライベートブラウジング等でlocalStorageが使えない場合は保存を諦める（今回の表示は閉じたままにする）
-    }
   }
 
   if (dismissed) return null;
@@ -790,7 +776,7 @@ function NewSiteBanner() {
     <div style={styles.newSiteBanner}>
       <Sparkles size={16} style={styles.newSiteBannerIcon} />
       <span style={styles.newSiteBannerText}>
-        クリスレは2026年9月にスタートしたばかりの新しいサイトです。今のうちに使い始めれば、あなたも「古参」になれるかも？
+        クリスレは2026年9月にスタートしたばかりの新しいサイトです。会員登録が早いほど会員番号が若い数字に！お早めに！
       </span>
       <button onClick={handleDismiss} style={styles.newSiteBannerClose} aria-label="閉じる">
         <X size={14} />
