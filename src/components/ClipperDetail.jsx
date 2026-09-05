@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Loader2, ExternalLink } from "lucide-react";
 import { useClipperProfile } from "../lib/use-clip-ranking";
 import { useDocumentMeta } from "../lib/use-document-meta";
@@ -35,6 +35,25 @@ function isSameDay(a, b) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
+// 期間・日別選択中の日付をURLの?period/?dayクエリに保存するための変換（2026-09-05、
+// ClipRanking.jsxで対応した「ブラウザバックで期間指定が失われる」不具合と同じ修正をこのページにも適用）。
+// toISOString()はUTC基準になり日付がズレうるため使わず、ローカルの年月日フィールドから直接
+// 文字列化・復元する。
+function formatDayParam(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function parseDayParam(value) {
+  const match = value ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(value) : null;
+  if (!match) return null;
+  const [, y, m, d] = match;
+  const date = new Date(Number(y), Number(m) - 1, Number(d));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function formatViews(n) {
   return new Intl.NumberFormat("ja-JP").format(n);
 }
@@ -42,8 +61,37 @@ function formatViews(n) {
 export default function ClipperDetail() {
   const { creatorId } = useParams();
   const goBack = useSmartBack("/clippers");
-  const [period, setPeriod] = useState("all"); // all | year | month | day
-  const [selectedDay, setSelectedDay] = useState(() => new Date());
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialPeriodParam = searchParams.get("period");
+  const initialPeriod = PERIOD_TABS.some((t) => t.value === initialPeriodParam) ? initialPeriodParam : "all";
+  const [period, setPeriod] = useState(initialPeriod);
+  const [selectedDay, setSelectedDay] = useState(() => parseDayParam(searchParams.get("day")) ?? new Date());
+
+  // 期間・日別選択をstateと同時にURLへも反映する（ClipRanking.jsxの?period/?day同期と同じパターン）。
+  function syncPeriodParams(nextPeriod, nextDay) {
+    setSearchParams(
+      (params) => {
+        const next = new URLSearchParams(params);
+        if (nextPeriod === "all") next.delete("period");
+        else next.set("period", nextPeriod);
+        if (nextPeriod === "day") next.set("day", formatDayParam(nextDay));
+        else next.delete("day");
+        return next;
+      },
+      { replace: true },
+    );
+  }
+
+  function handlePeriodSelect(value) {
+    setPeriod(value);
+    syncPeriodParams(value, selectedDay);
+  }
+
+  function handleDaySelect(d) {
+    setSelectedDay(d);
+    syncPeriodParams(period, d);
+  }
+
   const { clips, creatorName, avatarUrl, totalViews, clipCount, rank, loading, error } = useClipperProfile(
     creatorId,
     50,
@@ -136,7 +184,7 @@ export default function ClipperDetail() {
         {PERIOD_TABS.map((t) => (
           <button
             key={t.value}
-            onClick={() => setPeriod(t.value)}
+            onClick={() => handlePeriodSelect(t.value)}
             style={period === t.value ? styles.tabActive : styles.tab}
           >
             {t.label}
@@ -149,7 +197,7 @@ export default function ClipperDetail() {
           {getLastSevenDays().map((d) => (
             <button
               key={d.toDateString()}
-              onClick={() => setSelectedDay(d)}
+              onClick={() => handleDaySelect(d)}
               style={isSameDay(d, selectedDay) ? styles.tabActive : styles.tab}
             >
               {formatDayLabel(d)}

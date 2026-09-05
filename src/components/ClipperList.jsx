@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Scissors, ChevronLeft, ChevronRight } from "lucide-react";
 import { useTopClippers } from "../lib/use-clip-ranking";
 import Footer from "./Footer";
@@ -18,13 +18,27 @@ function formatViews(n) {
 }
 
 export default function ClipperList() {
-  const [period, setPeriod] = useState("all"); // all | year | month
+  // 期間タブをURLの?periodクエリにも同期する（2026-09-05、ClipRanking.jsxで対応した
+  // 「ブラウザバックで期間指定が失われる」不具合と同じ修正をこのページにも適用）。
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialPeriodParam = searchParams.get("period");
+  const initialPeriod = PERIOD_TABS.some((t) => t.value === initialPeriodParam) ? initialPeriodParam : "all";
+  const [period, setPeriod] = useState(initialPeriod);
   const [page, setPage] = useState(1);
   const { clippers, loading } = useTopClippers(PAGE_SIZE, (page - 1) * PAGE_SIZE, period);
 
   function handlePeriodChange(next) {
     setPeriod(next);
     setPage(1); // 期間を切り替えたら1ページ目に戻す（違うページに条件が引き継がれて空表示になるのを防ぐ）
+    setSearchParams(
+      (params) => {
+        const next2 = new URLSearchParams(params);
+        if (next === "all") next2.delete("period");
+        else next2.set("period", next);
+        return next2;
+      },
+      { replace: true },
+    );
   }
 
   return (
