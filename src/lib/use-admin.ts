@@ -133,6 +133,33 @@ export function useAdminDashboard(password) {
   return { data, loading, error, refresh };
 }
 
+// サイト閲覧の可視化用（2026-09-06追加）。GA4も別途導入済みだが、あちらを見るには
+// Google Analyticsに毎回ログインする必要があるため、日々の運用でパッと見るぶんには
+// 管理画面内で完結する簡易版として用意した。
+export function useAdminPageViews(password) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const refresh = useCallback(async () => {
+    if (!password) return;
+    setLoading(true);
+    const { data, error } = await supabase.rpc("admin_get_page_view_stats", { p_password: password });
+    if (error) setError(error.message);
+    else {
+      setData(data);
+      setError(null);
+    }
+    setLoading(false);
+  }, [password]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  return { data, loading, error, refresh };
+}
+
 export function useAdminMembers(password) {
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);

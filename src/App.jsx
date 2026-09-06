@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { supabase } from "./lib/supabase-client";
 import Header from "./components/Header";
 import ClipRanking from "./components/ClipRanking";
 import BroadcasterList from "./components/BroadcasterList";
@@ -26,9 +28,39 @@ import MyPage from "./components/MyPage";
 // （BackgroundGlowを全ページ展開した際もAdminPageだけ除外した既存方針と同じ考え方）。
 const NO_HEADER_PREFIXES = ["/admin-e9ae0115e698436e"];
 
+// 管理画面「サイト閲覧の可視化」用のページビュー記録（2026-09-06追加）。生パスのまま
+// 記録するとクリップID等の可変部分でユニーク値が54万件超に散ってしまうため、
+// ルートテンプレート（例: /clips/:id）に正規化してから保存する。
+const DYNAMIC_PATH_PATTERNS = [
+  [/^\/clips\/.+$/, "/clips/:id"],
+  [/^\/broadcasters\/.+$/, "/broadcasters/:name"],
+  [/^\/clippers\/.+$/, "/clippers/:id"],
+  [/^\/threads\/.+$/, "/threads/:id"],
+];
+
+function normalizePagePath(pathname) {
+  for (const [pattern, template] of DYNAMIC_PATH_PATTERNS) {
+    if (pattern.test(pathname)) return template;
+  }
+  return pathname;
+}
+
+function usePageViewTracking(pathname) {
+  useEffect(() => {
+    if (pathname.startsWith("/admin-e9ae0115e698436e")) return; // 管理画面自身の閲覧は集計対象外
+    supabase
+      .from("page_views")
+      .insert({ path: normalizePagePath(pathname) })
+      .then(({ error }) => {
+        if (error) console.warn("page_views insert failed", error.message);
+      });
+  }, [pathname]);
+}
+
 function AppRoutes() {
   const location = useLocation();
   const showHeader = !NO_HEADER_PREFIXES.some((p) => location.pathname.startsWith(p));
+  usePageViewTracking(location.pathname);
 
   return (
     <>

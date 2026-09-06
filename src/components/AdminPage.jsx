@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import {
   ArrowLeft, Lock, LogOut, Mail, Flag, UserPlus, EyeOff, Eye, Check,
   LayoutDashboard, Users, Film, MessageCircle, Heart, Smile, Tag, Hash,
-  TrendingUp, Search, RefreshCw, Clock, Award, Trash2,
+  TrendingUp, Search, RefreshCw, Clock, Award, Trash2, BarChart3,
 } from "lucide-react";
 import {
   useAdminAuth,
@@ -13,6 +13,7 @@ import {
   useAdminBroadcasterRequests,
   useAdminMembers,
   useAdminClipTags,
+  useAdminPageViews,
 } from "../lib/use-admin";
 
 function formatNumber(n) {
@@ -45,6 +46,12 @@ const REQUEST_STATUS_LABELS = {
 
 function formatDateTime(ts) {
   return new Date(ts).toLocaleString("ja-JP", { dateStyle: "short", timeStyle: "short" });
+}
+
+function formatShortDate(dateStr) {
+  if (!dateStr) return "―";
+  const [, m, d] = dateStr.split("-");
+  return `${Number(m)}/${Number(d)}`;
 }
 
 function LoginForm({ login, verifying, error }) {
@@ -285,6 +292,59 @@ function DashboardPanel({ password }) {
   );
 }
 
+function PageViewChart({ daily }) {
+  const max = Math.max(1, ...daily.map((d) => d.count));
+  return (
+    <div>
+      <div style={styles.chartBars}>
+        {daily.map((d) => (
+          <div key={d.date} style={styles.chartBarCol} title={`${formatShortDate(d.date)}: ${formatNumber(d.count)}件`}>
+            <div style={{ ...styles.chartBar, height: `${Math.max(2, (d.count / max) * 100)}%` }} />
+          </div>
+        ))}
+      </div>
+      <div style={styles.chartAxisRow}>
+        <span>{formatShortDate(daily[0]?.date)}</span>
+        <span>{formatShortDate(daily[daily.length - 1]?.date)}</span>
+      </div>
+    </div>
+  );
+}
+
+function PageViewsPanel({ password }) {
+  const { data, loading, error, refresh } = useAdminPageViews(password);
+
+  if (loading && !data) return <p style={styles.loadingText}>読み込み中…</p>;
+  if (error) return <p style={styles.errorText}>{error}</p>;
+  if (!data) return null;
+
+  return (
+    <div>
+      <button onClick={refresh} style={styles.refreshBtn}>
+        <RefreshCw size={12} />
+        更新
+      </button>
+
+      <Section icon={BarChart3} title="ページビュー">
+        <div style={styles.statGrid}>
+          <StatCard icon={BarChart3} label="過去24時間" value={data.total_24h} />
+          <StatCard icon={BarChart3} label="過去7日間" value={data.total_7d} />
+          <StatCard icon={BarChart3} label="累計" value={data.total_all_time} />
+        </div>
+        <p style={styles.rankGroupTitle}>直近30日間の推移（日別・日本時間）</p>
+        <PageViewChart daily={data.daily ?? []} />
+      </Section>
+
+      <Section icon={TrendingUp} title="よく見られているページ（直近7日間）">
+        {(data.top_paths_7d ?? []).length === 0 && <p style={styles.emptyText}>まだデータがありません</p>}
+        {(data.top_paths_7d ?? []).map((p, i) => (
+          <RankRow key={p.path} rank={i + 1} label={p.path} value={`${formatNumber(p.cnt)}回`} />
+        ))}
+      </Section>
+    </div>
+  );
+}
+
 function ContactMessagesPanel({ password }) {
   const { messages, loading, error, setStatus } = useAdminContactMessages(password);
 
@@ -449,6 +509,7 @@ function ClipTagsPanel({ password }) {
 
 const TABS = [
   { key: "dashboard", label: "ダッシュボード", icon: LayoutDashboard },
+  { key: "pageViews", label: "サイト閲覧", icon: BarChart3 },
   { key: "contact", label: "お問い合わせ", icon: Mail },
   { key: "reports", label: "コメント通報", icon: Flag },
   { key: "requests", label: "配信者リクエスト", icon: UserPlus },
@@ -499,6 +560,7 @@ export default function AdminPage() {
       </div>
 
       {activeTab === "dashboard" && <DashboardPanel password={password} />}
+      {activeTab === "pageViews" && <PageViewsPanel password={password} />}
       {activeTab === "contact" && <ContactMessagesPanel password={password} />}
       {activeTab === "reports" && <CommentReportsPanel password={password} />}
       {activeTab === "requests" && <BroadcasterRequestsPanel password={password} />}
@@ -718,4 +780,8 @@ const styles = {
   },
   tagChipCount: { color: "#7A76A8", fontSize: 10.5 },
   cronStatus: { fontSize: 11, fontWeight: 600, width: 32, flexShrink: 0 },
+  chartBars: { display: "flex", alignItems: "flex-end", gap: 3, height: 120, marginBottom: 6 },
+  chartBarCol: { flex: 1, display: "flex", alignItems: "flex-end", height: "100%" },
+  chartBar: { width: "100%", background: "#AFA9EC", borderRadius: "2px 2px 0 0", minHeight: 2 },
+  chartAxisRow: { display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "#5A5A66" },
 };
