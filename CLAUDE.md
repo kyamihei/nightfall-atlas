@@ -677,7 +677,7 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
 - GitHub Actions Secrets: `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `TARGET_GAME_IDS`,
   `X_API_KEY`, `X_API_KEY_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_TOKEN_SECRET`（2026-09-03追加、X自動投稿用。
   Supabase Vaultではなくこちらに置く理由は「毎日のランキングをXへ自動投稿」節参照）
-- 元のセットアップ手順・秘密値は親ディレクトリ（`C:\clip-vote`）の `CLAUDE_CODE_INSTRUCTIONS.md` と `.env.human-provided` を参照（このリポジトリには含まれない）
+- 元のセットアップ手順・秘密値は親ディレクトリ（`C:\kurisure`。2026-09-07に`C:\clip-vote`から改名、詳細は「プロジェクト名をclip-voteからkurisureへ改名（続き）」節参照）の `CLAUDE_CODE_INSTRUCTIONS.md` と `.env.human-provided` を参照（このリポジトリには含まれない）
 
 ## 簡易管理画面（2026-09-03追加、2026-09-03にURL非公開化）
 
@@ -2087,6 +2087,34 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
     Management API経由の対応が別途必要。
   - 旧ドメイン（`https://clip-vote.vercel.app`）・親ディレクトリ（`C:\clip-vote`）への
     本ファイル内の言及は、実際に存在した/する名称の履歴的な記録のため書き換えていない。
+
+## プロジェクト名をclip-voteからkurisureへ改名（続き）（2026-09-07追加）
+
+- 上記でスコープ外としていた2点を、ユーザーがローカル/Supabaseダッシュボードで直接実施した
+  （ローカルの作業ディレクトリ名変更・Supabase側の表示名変更のため、いずれもこのセッションからは
+  操作できない領域）。**本セッションでは実施後の動作確認のみ行った**。
+  - **親ディレクトリ名を`C:\clip-vote`→`C:\kurisure`に変更**（このリポジトリ自体は元々
+    `C:\clip-vote\kurisure`のように親の下の`kurisure`フォルダとして存在しており、フォルダ名自体は
+    変更していない。変わったのはその親の名称のみ）。`git remote -v`が引き続き
+    `https://github.com/kyamihei/kurisure.git`を指しており、`git status`もクリーンなことを確認。
+    ローカルの絶対パスをハードコードしている箇所（ビルド設定・スクリプト等）はリポジトリ内に
+    見当たらず、影響なし。
+  - **Supabaseプロジェクトの表示名を`ClipVote`→`kurisure`に変更**。プロジェクトref
+    （`awnwspavalqksllbtkty`）・API URL（`https://awnwspavalqksllbtkty.supabase.co`）・
+    anon/service_roleキーはこの操作では変わらない（表示名のみの変更のため）ことを
+    `npx supabase projects list`（`linked: true`のまま、ref/URLが`.env`の値と一致）で確認済み。
+    したがって`.env`・GitHub Actions Secrets・pg_cronのWebhook設定・Edge Functionsの
+    デプロイ先等、ref/URL/キーに依存する設定は一切変更不要（実際に何も変更していない）。
+  - **今後の教訓**: Supabaseプロジェクトの「表示名」変更はref/URL/キーを変えない安全な操作
+    （Vercel/GitHubのリポジトリ名変更とは異なり、こちらはURLの一部がプロジェクト名そのものに
+    なるため影響範囲が大きかった、「プロジェクト名をclip-voteからkurisureへ改名」節参照）。
+    今後Supabase側で本当に影響が大きい変更（プロジェクトの作り直し等）をする場合は、
+    ref自体が変わるため`.env`・Secrets・pg_cron等の全面的な更新が必要になる点に注意すること。
+  - 本ファイル内に残っていた「本番のSupabaseプロジェクト（ClipVote）」（旧「並び替え・
+    コメント返信」節）・「親ディレクトリ（`C:\clip-vote`）」（旧「環境変数」節）という
+    直近の環境を指す表記は、上記の変更を踏まえて実態（`kurisure`表示名・`C:\kurisure`）に
+    追従するよう「環境変数」節のみ更新した（「並び替え・コメント返信」節側は改名前の時点の
+    記録としてそのまま残している）。
 
 # ステアリング
 
