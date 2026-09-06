@@ -1,0 +1,15 @@
+-- cleanup_low_view_clips()の関数オーバーロード曖昧化バグを修正（2026-09-07）。
+--
+-- 20260904080000_clip_cleanup_batched.sqlがp_batch_size引数を追加した3引数版を
+-- create or replaceで新規追加した際、旧2引数版をdrop function if existsせずに残していた
+-- （このプロジェクトで既存の「戻り値の列名/シグネチャを変える既存RPCを拡張する際はdrop
+-- function if existsを忘れない」教訓と同種の罠）。結果、pg_cronの日次ジョブ
+-- （trigger-cleanup-low-view-clips）が引数無しで呼ぶ`select cleanup_low_view_clips();`が
+-- 2引数版・3引数版のどちらも全引数デフォルトで候補になり、
+-- "function cleanup_low_view_clips() is not unique"エラーで2026-09-04の導入当日から
+-- 3日間毎日失敗し続けていた（cron.job_run_detailsで確認）。この間クリーンアップが一度も
+-- 実行されず、DB容量が340MB→553MBまで再肥大化しFree Plan上限500MBを超過した。
+--
+-- 旧2引数版はどこからも明示的な引数指定で呼ばれていない（schema.sql・他のコード共に
+-- 3引数版のみを参照）ため、削除して一意にする。
+drop function if exists cleanup_low_view_clips(int, int);
