@@ -1382,7 +1382,7 @@ $$ language plpgsql security definer;
 -- 各workflowファイル側の`schedule:`トリガーは同時に削除済み（二重実行防止、`workflow_dispatch:`のみ残す）。
 --
 -- 事前準備（このファイルには含まれない、平文の秘密情報をgit管理下に置かないため）:
---   GitHub側でclip-voteリポジトリのみに限定したfine-grained PAT（Actions: Read and write権限）を発行し、
+--   GitHub側でkurisureリポジトリのみに限定したfine-grained PAT（Actions: Read and write権限）を発行し、
 --   以下でVaultへ登録しておくこと。
 --     select vault.create_secret('<PAT>', 'github_actions_pat', '...');
 create extension if not exists pg_cron;
@@ -1393,12 +1393,12 @@ select cron.schedule(
   '*/15 * * * *',
   $$
   select net.http_post(
-    url := 'https://api.github.com/repos/kyamihei/clip-vote/actions/workflows/sync-live-clips.yml/dispatches',
+    url := 'https://api.github.com/repos/kyamihei/kurisure/actions/workflows/sync-live-clips.yml/dispatches',
     headers := jsonb_build_object(
       'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'github_actions_pat'),
       'Accept', 'application/vnd.github+json',
       'Content-Type', 'application/json',
-      'User-Agent', 'clip-vote-pg-cron'
+      'User-Agent', 'kurisure-pg-cron'
     ),
     body := jsonb_build_object('ref', 'master'),
     timeout_milliseconds := 10000
@@ -1411,12 +1411,12 @@ select cron.schedule(
   '20 * * * *',
   $$
   select net.http_post(
-    url := 'https://api.github.com/repos/kyamihei/clip-vote/actions/workflows/refresh-clip-views.yml/dispatches',
+    url := 'https://api.github.com/repos/kyamihei/kurisure/actions/workflows/refresh-clip-views.yml/dispatches',
     headers := jsonb_build_object(
       'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'github_actions_pat'),
       'Accept', 'application/vnd.github+json',
       'Content-Type', 'application/json',
-      'User-Agent', 'clip-vote-pg-cron'
+      'User-Agent', 'kurisure-pg-cron'
     ),
     body := jsonb_build_object('ref', 'master'),
     timeout_milliseconds := 10000
@@ -1429,12 +1429,12 @@ select cron.schedule(
   '5 21 * * *',
   $$
   select net.http_post(
-    url := 'https://api.github.com/repos/kyamihei/clip-vote/actions/workflows/sync-clips.yml/dispatches',
+    url := 'https://api.github.com/repos/kyamihei/kurisure/actions/workflows/sync-clips.yml/dispatches',
     headers := jsonb_build_object(
       'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'github_actions_pat'),
       'Accept', 'application/vnd.github+json',
       'Content-Type', 'application/json',
-      'User-Agent', 'clip-vote-pg-cron'
+      'User-Agent', 'kurisure-pg-cron'
     ),
     body := jsonb_build_object('ref', 'master'),
     timeout_milliseconds := 10000
@@ -1814,12 +1814,12 @@ select cron.schedule(
   '0 0 * * *', -- UTC 0:00 = JST 9:00
   $$
   select net.http_post(
-    url := 'https://api.github.com/repos/kyamihei/clip-vote/actions/workflows/post-daily-ranking.yml/dispatches',
+    url := 'https://api.github.com/repos/kyamihei/kurisure/actions/workflows/post-daily-ranking.yml/dispatches',
     headers := jsonb_build_object(
       'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'github_actions_pat'),
       'Accept', 'application/vnd.github+json',
       'Content-Type', 'application/json',
-      'User-Agent', 'clip-vote-pg-cron'
+      'User-Agent', 'kurisure-pg-cron'
     ),
     body := jsonb_build_object('ref', 'master'),
     timeout_milliseconds := 10000

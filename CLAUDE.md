@@ -1,4 +1,4 @@
-# ClipVote プロジェクト概要
+# Kurisure プロジェクト概要
 
 サイト名「クリスレ」（`<title>`は「クリスレ | Twitchクリップの掲示板サイト」）。
 Twitchクリップのランキング掲示板。お気に入り・独自リアクションスタンプ・匿名コメント（返信対応）・
@@ -496,7 +496,7 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
 
 ## 独自ドメイン移行（kurisure.jp）・ファビコン刷新・基本SEO対応（2026-09-03追加）
 
-- 独自ドメイン`https://kurisure.jp`をVercelプロジェクト（`clip-vote`）に追加し、稼働確認済み
+- 独自ドメイン`https://kurisure.jp`をVercelプロジェクト（`clip-vote`、2026-09-07に`kurisure`へ改名）に追加し、稼働確認済み
   （お名前.comでドメイン取得 → Aレコード`kurisure.jp → 76.76.21.21`を設定 →
   「DNSレコード設定を利用する」用の専用ネームサーバー`01〜04.dnsv.jp`へ切替、という2段階の設定が
   必要だった。お名前.comは「DNSレコード設定」と「ネームサーバー設定」が別画面で、後者を
@@ -2057,6 +2057,36 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
     末尾の`main().catch(...)`呼び出しを一時的にコメントアウトする（または関数側だけを
     別ファイルにコピーする）等、トップレベル実行が走らないようにしてから行うこと**。
     今後同種の検証を行う際に再発させないための教訓として記録する。
+
+## プロジェクト名をclip-voteからkurisureへ改名（2026-09-07追加）
+
+- 「clip-voteとなっているところを全てkurisureに変更したい」という要望への対応。以下を変更した:
+  - GitHubリポジトリ名: `kyamihei/clip-vote` → `kyamihei/kurisure`（`gh repo rename`）。ローカルの
+    `git remote`もあわせて更新済み。
+  - Vercelプロジェクト名: `clip-vote` → `kurisure`（`vercel project rename`）。本番ドメイン
+    （`kurisure.jp`）・デプロイ設定への影響は無し（プロジェクトIDは不変のため）。
+  - `package.json`/`package-lock.json`のnameフィールド、`SETUP.md`のブランディング表記、
+    `src/styles/theme.css`の冒頭コメント。
+  - **本番影響のある変更**: `supabase/schema.sql`のpg_cron定義4件（`trigger-sync-live-clips`/
+    `trigger-refresh-clip-views`/`trigger-sync-clips`/`trigger-post-daily-ranking`）が
+    GitHub REST APIの`workflow_dispatch`エンドポイントを`https://api.github.com/repos/
+    kyamihei/clip-vote/...`という**旧リポジトリ名で直接ハードコード**していたため、
+    リポジトリ名変更後もそのままでは実行が壊れる状態だった。新規マイグレーション
+    `20260907000000_rename_repo_clip_vote_to_kurisure.sql`で4ジョブとも新リポジトリ名の
+    URL・User-Agent（`kurisure-pg-cron`）へ更新し、本番へ直接適用済み
+    （`cron.schedule(job_name, ...)`は同名ジョブが既存の場合は置き換えになる仕組みを利用、
+    unschedule不要）。適用後、実際に`net.http_post`で`trigger-sync-live-clips`相当のリクエストを
+    手動発行し、`status_code: 204`＋実際に新リポジトリ（`kyamihei/kurisure`）でActionsの
+    runが起動することを確認済み。
+  - **fine-grained PATはリポジトリ名変更後も無改修で動作した**（GitHub側でリポジトリIDに
+    紐づいているためと推測。念のため上記の実地確認で裏付け済み）。
+- **意図的にスコープ外とした点**:
+  - Supabaseプロジェクトの表示名は今回のユーザー確認の選択肢に含めておらず、`ClipVote`の
+    ままにしてある（本ファイル内の「本番のSupabaseプロジェクト（ClipVote）」という表記も
+    実態に合わせてそのまま残した）。改名する場合はSupabaseダッシュボードまたは
+    Management API経由の対応が別途必要。
+  - 旧ドメイン（`https://clip-vote.vercel.app`）・親ディレクトリ（`C:\clip-vote`）への
+    本ファイル内の言及は、実際に存在した/する名称の履歴的な記録のため書き換えていない。
 
 # ステアリング
 
