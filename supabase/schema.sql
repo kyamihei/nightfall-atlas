@@ -2043,11 +2043,14 @@ grant execute on function cleanup_low_view_clips(int, int, int) to service_role;
 
 -- 毎日UTC 18:00（JST 3:00）にpg_cronから直接呼ぶ（Twitch APIを叩かない純粋なSQL操作のため、
 -- 他の同期ジョブと違いGitHub Actions経由にしない）。
+-- p_batch_size=15000は2026-09-07に2000から引き上げ済み（詳細は
+-- 20260907020000_increase_cleanup_batch_size.sql参照。追跡配信者数の増加に伴うバックフィル量
+-- 増加でデフォルト2000件/日では処理が追いつかなくなったため）。
 select cron.schedule(
   'trigger-cleanup-low-view-clips',
   '0 18 * * *',
   $$
-  select cleanup_low_view_clips();
+  select cleanup_low_view_clips(14, 50, 15000);
   select refresh_ranking_views();
   $$
 );
