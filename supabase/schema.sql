@@ -1809,6 +1809,11 @@ create table if not exists daily_ranking_posts (
   posted_at timestamptz not null default now()
 );
 
+-- 完全に内部運用専用（post-daily-ranking.tsがservice_roleキーで読み書き）のため
+-- ポリシーは追加せず有効化のみ（2026-09-09、Supabaseのセキュリティアドバイザーが検出した
+-- CRITICAL ISSUE=rls_disabled_in_publicの修正。詳細はCLAUDE.md参照）。
+alter table daily_ranking_posts enable row level security;
+
 select cron.schedule(
   'trigger-post-daily-ranking',
   '0 0 * * *', -- UTC 0:00 = JST 9:00
@@ -2002,6 +2007,11 @@ create table if not exists clip_cleanup_log (
   grace_period_days integer not null,
   view_threshold integer not null
 );
+
+-- 完全に内部運用専用（cleanup_low_view_clips() security definer関数のみが書き込む）のため
+-- ポリシーは追加せず有効化のみ（2026-09-09、Supabaseのセキュリティアドバイザーが検出した
+-- CRITICAL ISSUE=rls_disabled_in_publicの修正。詳細はCLAUDE.md参照）。
+alter table clip_cleanup_log enable row level security;
 
 create or replace function cleanup_low_view_clips(
   p_grace_period_days int default 14,
