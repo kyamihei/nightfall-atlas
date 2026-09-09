@@ -2239,6 +2239,37 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   Supabase CLI（`npx supabase db query --linked`）をBash経由で使う方が、余計な承認待ちで
   ユーザーの手を止めずに済む。
 
+## SupabaseセキュリティアドバイザーによるRLS無効テーブルの検出・修正（2026-09-09追加）
+
+- Supabaseから「Action required: security vulnerabilities detected in your projects」という
+  自動セキュリティ警告メール（CRITICAL ISSUE=`rls_disabled_in_public`）を受信し、対応した。
+  本番で`select relname, relrowsecurity from pg_class where relnamespace='public'::regnamespace
+  and relkind='r'`を実行して確認したところ、`daily_ranking_posts`（X自動投稿の重複防止記録）
+  ・`clip_cleanup_log`（低視聴回数クリップ自動削除の実行ログ）の2テーブルがRLS無効のまま
+  だった。両方とも`anon`/`authenticated`ロールにselect/insert/update/delete/truncateの
+  権限が付与された状態だったため、PostgREST経由で誰でも読み書き削除できてしまう状態
+  （テーブル作成時のマイグレーションで`enable row level security`を書き忘れていたのが原因、
+  該当マイグレーションファイル自体には元々RLS文が存在せず、`schema.sql`側にも反映漏れがあった）。
+- **修正**: どちらも完全に内部運用専用テーブル（`daily_ranking_posts`は`post-daily-ranking.ts`が
+  service_roleキーで読み書き、`clip_cleanup_log`は`cleanup_low_view_clips()`security definer関数
+  のみが書き込み、フロントエンドからの直接参照は無し）のため、公開ロール向けのポリシーは
+  追加せず`alter table ... enable row level security`のみで対応（ポリシー無し＝anon/authenticated
+  へは全操作を拒否、テーブル所有者・service_role・pg_cronの実行ロールはRLSの影響を受けないため
+  既存の運用は壊れない）。`supabase/migrations/20260909000000_enable_rls_internal_tables.sql`を
+  追加し本番に適用、`schema.sql`にも該当テーブル定義の直後に`alter table ... enable row level
+  security`を追記して同期済み。
+- **検証**: `curl`で匿名キー（anonキー）を使い、修正前後でREST APIの挙動を確認。
+  修正後はSELECTが空配列`[]`（データ非公開）、INSERTは`42501`（RLS policy violation、HTTP 401）で
+  拒否、DELETEはHTTP 204だが対象行が見えないため実質0件削除（RLSがUSING句で全行を除外する
+  ため、エラーにはならず「該当0件で成功」という形になる点に注意。今後同種の検証をする際は
+  ステータスコードだけでなく実際に行が変化していないかも確認すること）。
+- **今後の教訓**: 新しいテーブルを追加する際は、既存の全テーブルが必ず
+  `alter table <name> enable row level security;`を伴っている（本ファイルの各テーブル追加節を
+  参照）ことを踏まえ、追加のたびに書き忘れがないか確認すること。可能であれば
+  `select relname, relrowsecurity from pg_class where relnamespace='public'::regnamespace and
+  relkind='r' and relrowsecurity=false;`のようなクエリで定期的に本番全体をチェックするとよい
+  （今回はSupabase側の自動検知メールで気づいたが、次回も同様に検知される保証はない）。
+
 # ステアリング
 
 - git commitを行う際は、同じタイミングでリモート（origin）へのpushも必ず行うこと。ユーザーから別途pushを依頼されるのを待たない。
