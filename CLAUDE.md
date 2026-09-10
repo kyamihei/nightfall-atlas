@@ -678,6 +678,7 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   `X_API_KEY`, `X_API_KEY_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_TOKEN_SECRET`（2026-09-03追加、X自動投稿用。
   Supabase Vaultではなくこちらに置く理由は「毎日のランキングをXへ自動投稿」節参照）
 - 元のセットアップ手順・秘密値は親ディレクトリ（`C:\kurisure`。2026-09-07に`C:\clip-vote`から改名、詳細は「プロジェクト名をclip-voteからkurisureへ改名（続き）」節参照）の `CLAUDE_CODE_INSTRUCTIONS.md` と `.env.human-provided` を参照（このリポジトリには含まれない）
+- **GitHubリポジトリ名は2026-09-10に`kurisure`から`nightfall-atlas`へ変更済み**（詳細は「GitHub Actions無料枠超過とリポジトリのpublic化」節参照）。`git remote`は`https://github.com/kyamihei/nightfall-atlas.git`
 
 ## 簡易管理画面（2026-09-03追加、2026-09-03にURL非公開化）
 
@@ -2269,6 +2270,62 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   `select relname, relrowsecurity from pg_class where relnamespace='public'::regnamespace and
   relkind='r' and relrowsecurity=false;`のようなクエリで定期的に本番全体をチェックするとよい
   （今回はSupabase側の自動検知メールで気づいたが、次回も同様に検知される保証はない）。
+
+## GitHub Actions無料枠超過とリポジトリのpublic化（2026-09-10追加、重要）
+
+- **発端**: GitHubから「Actions無料分（月2,000分）を100%使用」という通知メールを受信。調査したところ、
+  単に課金される（想定通り、「最新クリップ反映の高速化」節参照）のではなく、**Actionsに$0の
+  アカウント予算（`Stop usage: Yes`）が設定されていたため、無料枠を使い切った時点で
+  全ワークフローがブロックされ実行不能になっていた**（`gh run view`で実際のエラー
+  `The job was not started because recent account payments have failed or your spending
+  limit needs to be increased`を確認）。影響は`sync-twitch-clips`（日次新規クリップ収集）・
+  `sync-live-clips`（15分おきライブ同期）・`refresh-clip-views`（毎時view_count同期）・
+  `post-daily-ranking`（毎朝X投稿）の4ワークフロー全て（pg_cronからのworkflow_dispatchが
+  軒並み数秒で失敗）。DB直接操作のクリーンアップcronのみ無関係のため影響なし。
+- **原因分析**: `sync-live-clips.yml`（15分おき）だけで月3,000〜5,000分消費する見込みだった
+  ことは導入時から把握済み（「最新クリップ反映の高速化」節）だったが、実際の請求ペースは
+  9/9時点で日次課金換算$1.76〜2.06（加速傾向）で、無料枠2,000分は月の1/3程度の時点で
+  枯渇していた。
+- **対応方針の検討**: ユーザーに「予算上限を上げて課金継続」「何もせず10/1のリセットを待つ」
+  「リポジトリをpublic化してActions無料枠問題自体を解消」の3案を提示。public化には
+  「ソースコード（ランキングロジック・DBスキーマ・運用ノウハウ）が模倣可能になる」という
+  ユーザーからの懸念指摘があり、検討の結果、**リポジトリ名をサイトと無関係な名前に変更した
+  うえでpublic化**する方針に決定。
+  - **重要な訂正**: 当初「public化すると管理画面URL（`/admin-e9ae0115e698436e`のような
+    推測困難パス）がソースから見えてしまう」という懸念を提示したが、これは誤りだった。
+    Viteはビルド時にクライアント側ルーティングの都合上このパス文字列を公開JSバンドルへ
+    そのまま埋め込むため、**GitHubの公開設定に関わらず、ライブサイトのJSを開発者ツールで
+    見れば元々誰でも発見可能な状態だった**。したがって管理画面URL対策としての追加作業
+    （環境変数化等）は行っていない（効果が無いため）。public化の実質的なリスクは
+    「コードベース・DB設計自体が模倣可能になる」点のみと整理した。
+- **実施内容**:
+  1. `gh repo rename nightfall-atlas --repo kyamihei/kurisure`でリポジトリ名を変更
+     （ローカルの`git remote`も追従して更新）。
+  2. 新規マイグレーション`20260910000000_rename_repo_kurisure_to_nightfall_atlas.sql`で
+     pg_cronの4ジョブ（`trigger-sync-live-clips`/`trigger-refresh-clip-views`/
+     `trigger-sync-clips`/`trigger-post-daily-ranking`）のwebhook URLを新リポジトリ名へ
+     更新し本番へ適用（「プロジェクト名をclip-voteからkurisureへ改名」節と全く同じ手順）。
+  3. `gh repo edit --visibility public --accept-visibility-change-consequences`でpublic化。
+  4. fine-grained PAT（`github_actions_pat`、Vault保管）・GitHub Actions Secrets（Twitch/X系
+     9件）は共にリポジトリID紐づけのため改名・public化を経ても無改修で機能することを
+     `gh secret list`で確認済み（前回のリポジトリ名変更時と同じ結論、「プロジェクト名を
+     clip-voteからkurisureへ改名」節参照）。
+  5. 実際に`gh workflow run sync-live-clips.yml`で手動実行し、`conclusion: success`を確認
+     （直前の自動実行はいずれも数秒で`spending limit`エラー失敗だったのに対し、public化後は
+     正常に完走、Actions利用自体が無料枠を消費しなくなったことを実地で確認できた）。
+- **今後の教訓**:
+  1. Actionsの予算アラート（`Budgets and alerts`）は「超過分を課金する」設定と「$0で
+     停止する」設定の両方があり、後者だとサービスが静かに全面停止する。無料枠に近い
+     運用をするワークフローがある場合は、この予算設定がどちらになっているか事前に
+     確認しておくこと。
+  2. publicリポジトリは標準GitHub-hostedランナーのActions分数が無料になるため、
+     頻繁なスケジュール実行（15分おき等）を伴うプロジェクトでは有力な恒久対策になる。
+     ソース公開に伴うリスク（模倣可能性）とのトレードオフはユーザー確認が必須。
+  3. クライアントサイドSPAのルーティングパス（管理画面URL等）は、たとえソース上で
+     環境変数化してもViteのビルド時埋め込みにより公開JSバンドルには結局残るため、
+     「ソースを隠す」ことに意味的な効果は無い。この種のURLをGitHubの公開設定から
+     切り離して守りたい場合は、クライアントルーティングではなくサーバー/Edge側での
+     アクセス制御が必要になる（今回は未実施、意図的にスコープ外）。
 
 # ステアリング
 
