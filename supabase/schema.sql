@@ -1654,8 +1654,35 @@ $$ language plpgsql security definer;
 revoke execute on function refresh_ranking_views() from public;
 grant execute on function refresh_ranking_views() to service_role;
 
+-- refresh_ranking_views()は6ビュー分の合計実行時間（実測100〜126秒）がSupabase REST API
+-- ゲートウェイのタイムアウト（実測約120〜126秒、DB側statement_timeoutとは別にゲートウェイ層で
+-- 課される制約でロール設定では回避不可）に達し、RPC経由の呼び出しがサイレントに失敗し続けていた
+-- （2026-09-14発覚、詳細は20260914010000_granular_ranking_view_refresh.sql参照）。
+-- アプリケーション側（sync-twitch-clips.ts / refresh-clip-views.ts）は1ビューずつRPCを呼ぶ
+-- refresh_ranking_view(text)に切り替え済み。この一括版は直接DB接続からの手動メンテナンス用に残す。
+create or replace function refresh_ranking_view(p_view text)
+returns void as $$
+begin
+  if p_view not in (
+    'top_broadcasters_mv',
+    'top_clippers_mv',
+    'top_clippers_this_year_mv',
+    'top_clippers_this_month_mv',
+    'admin_dashboard_clip_stats_mv',
+    'top_games_mv'
+  ) then
+    raise exception 'refresh_ranking_view: 未知のビュー名です: %', p_view;
+  end if;
+
+  execute format('refresh materialized view concurrently %I', p_view);
+end;
+$$ language plpgsql security definer;
+
+revoke execute on function refresh_ranking_view(text) from public;
+grant execute on function refresh_ranking_view(text) to service_role;
+
 -- 上のCREATE OR REPLACEだけだと初回はまだ空（1行も無い）ため、マイグレーション適用時に1度だけ
--- 手動で埋めておく（以降はsync-twitch-clips.ts等が呼ぶrefresh_ranking_views()経由で更新される）。
+-- 手動で埋めておく（以降はsync-twitch-clips.ts等が呼ぶrefresh_ranking_view()経由で更新される）。
 refresh materialized view admin_dashboard_clip_stats_mv;
 refresh materialized view top_games_mv;
 
@@ -2056,12 +2083,19 @@ grant execute on function cleanup_low_view_clips(int, int, int) to service_role;
 -- p_batch_size=15000は2026-09-07に2000から引き上げ済み（詳細は
 -- 20260907020000_increase_cleanup_batch_size.sql参照。追跡配信者数の増加に伴うバックフィル量
 -- 増加でデフォルト2000件/日では処理が追いつかなくなったため）。
+-- **refresh_ranking_views()はここでは呼ばない**（2026-09-14修正）: pg_cronがこのジョブを実行する
+-- `postgres`ロールはservice_roleと違いstatement_timeoutが120秒（インスタンス既定値）のままのため、
+-- 6ビュー分のリフレッシュがこれを超えてタイムアウトすると、同じコマンド文字列内（=暗黙の1トランザクション）の
+-- cleanup_low_view_clips()による削除までロールバックされてしまう。実際に2026-09-08〜09-13の6日間、
+-- 日次クリーンアップが実質無効化されDB容量が再肥大化する実害が発生した
+-- （詳細は20260914000000_cleanup_cron_drop_refresh_call.sql参照）。refresh_ranking_views()は
+-- refresh-clip-views.ts（毎時、service_role経由のRPC呼び出しで300秒の余裕あり）が
+-- 既に定期的に呼んでいるため、ここでの呼び出しは冗長かつ有害と判断し削除した。
 select cron.schedule(
   'trigger-cleanup-low-view-clips',
   '0 18 * * *',
   $$
   select cleanup_low_view_clips(14, 50, 15000);
-  select refresh_ranking_views();
   $$
 );
 

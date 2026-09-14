@@ -46,6 +46,28 @@ const BACKFILL_MAX_PAGES = 500; // 暴走防止用の技術的な安全上限（
 const RATE_LIMIT_RETRY_MAX = 3; // 429応答時のリトライ回数
 const RATE_LIMIT_DEFAULT_WAIT_MS = 10_000; // Ratelimit-Resetヘッダが無い場合のデフォルト待機時間
 
+// 6ビュー合計を1RPCでrefreshするrefresh_ranking_views()は、実測100〜126秒かかり
+// Supabase REST APIゲートウェイのタイムアウト（実測約120〜126秒、DB側のstatement_timeoutとは別に
+// ゲートウェイ層で課される制約でロール設定では回避不可）を超えて"upstream request timeout"で
+// サイレントに失敗し続けていた（2026-09-14発覚）。ビューごとに個別RPC（refresh_ranking_view）を
+// 呼ぶことで1回あたりの所要時間を120秒枠に収める。
+const RANKING_VIEWS = [
+  "top_broadcasters_mv",
+  "top_clippers_mv",
+  "top_clippers_this_year_mv",
+  "top_clippers_this_month_mv",
+  "admin_dashboard_clip_stats_mv",
+  "top_games_mv",
+] as const;
+
+// deno-lint-ignore no-explicit-any
+async function refreshRankingViews(supabase: any) {
+  for (const view of RANKING_VIEWS) {
+    const { error } = await supabase.rpc("refresh_ranking_view", { p_view: view });
+    if (error) console.error(`ランキング集計ビュー(${view})の更新に失敗:`, error.message);
+  }
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -498,8 +520,7 @@ async function main() {
 
   // 5. 配信者/クリッパーランキングの事前集計ビューを更新する（RPC経由、clips全件の
   //    ライブ集計は匿名ロールのタイムアウトを超えるため、事前計算を使う設計になっている）
-  const { error: refreshErr } = await supabase.rpc("refresh_ranking_views");
-  if (refreshErr) console.error("ランキング集計ビューの更新に失敗:", refreshErr.message);
+  await refreshRankingViews(supabase);
 
   console.log("クリップ同期が完了しました。");
 }

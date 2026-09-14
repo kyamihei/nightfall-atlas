@@ -91,6 +91,33 @@ async function fetchWithRetry(url: URL, token: string): Promise<Response | null>
   return res;
 }
 
+// SupabaseのGatewayタイムアウト等、一時的なエラーが単発で発生しただけでスクリプト全体が
+// 失敗終了していた（2026-09-14、頻発するGitHub Actions失敗通知の原因調査で発覚）。
+// 短い待機を挟んで数回リトライすることで、一時的なエラーを吸収する。
+const SUPABASE_RETRY_MAX = 2;
+const SUPABASE_RETRY_WAIT_MS = 3_000;
+
+/** Supabase呼び出し（`{data, error}`を返すPostgREST系のthenable）を、失敗時に数回リトライする */
+async function withSupabaseRetry(
+  // deno-lint-ignore no-explicit-any
+  run: () => PromiseLike<{ data: any; error: any }>,
+  label: string,
+  // deno-lint-ignore no-explicit-any
+): Promise<{ data: any; error: any }> {
+  // deno-lint-ignore no-explicit-any
+  let lastError: any = null;
+  for (let attempt = 0; attempt <= SUPABASE_RETRY_MAX; attempt++) {
+    const { data, error } = await run();
+    if (!error) return { data, error: null };
+    lastError = error;
+    if (attempt < SUPABASE_RETRY_MAX) {
+      console.warn(`${label}に失敗、リトライします（${attempt + 1}回目）: ${error.message}`);
+      await sleep(SUPABASE_RETRY_WAIT_MS);
+    }
+  }
+  return { data: null, error: lastError };
+}
+
 /**
  * PostgRESTの既定の行数上限（Supabase側の設定で1000件）を超えるSELECTは、
  * range()等で明示的にページングしない限りサイレントに切り詰められる
@@ -110,7 +137,10 @@ async function fetchAllRows(
   let from = 0;
 
   while (true) {
-    const { data, error } = await buildQuery(supabase.from(table)).range(from, from + PAGE_SIZE - 1);
+    const { data, error } = await withSupabaseRetry(
+      () => buildQuery(supabase.from(table)).range(from, from + PAGE_SIZE - 1),
+      `${table}の取得`,
+    );
     if (error) {
       console.error(`${table}の取得に失敗しました:`, error.message);
       return null;
@@ -321,7 +351,10 @@ async function main() {
         last_seen_at: new Date().toISOString(),
         profile_image_url: avatars.get(broadcaster_id) ?? null,
       }));
-      const { error } = await supabase.from("tracked_broadcasters").upsert(rows, { onConflict: "broadcaster_id" });
+      const { error } = await withSupabaseRetry(
+        () => supabase.from("tracked_broadcasters").upsert(rows, { onConflict: "broadcaster_id" }),
+        "tracked_broadcastersのupsert",
+      );
       if (error) console.error("tracked_broadcastersのupsertに失敗:", error.message);
     }
   }
