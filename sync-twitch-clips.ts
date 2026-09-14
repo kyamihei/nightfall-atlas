@@ -28,6 +28,14 @@ const TARGET_GAME_IDS = (Deno.env.get("TARGET_GAME_IDS") ?? "")
   .map((s) => s.trim())
   .filter(Boolean);
 
+// 配信者の新規発見を一時停止する（2026-09-14、ユーザー指示）。追跡配信者数の増加ペースが
+// DB容量圧迫（新規発見のたびに過去クリップの一括バックフィルが走る）の主因になっていたため、
+// 「いまいる配信者でだいたい網羅できている」という判断で一旦オフにした。既存の追跡配信者
+// （tracked_broadcasters）のクリップ取得・view_count同期・まだバックフィルが済んでいない
+// 既存配信者へのバックフィルは、このフラグと無関係に引き続き行われる。再開する場合は
+// trueに戻すだけでよい（sync-live-clips.ts側の同名フラグと合わせて変更すること）。
+const DISCOVERY_ENABLED = false;
+
 const STREAMS_PER_GAME = 100; // 1カテゴリあたり発見する配信の上限（Helixの最大値）
 const TOP_JA_STREAMS_LIMIT = 400; // ゲームカテゴリを問わない「日本語配信 視聴者数上位」の発見件数上限（Helix1ページ最大100のためページネーションで積み上げる）
 const HELIX_STREAMS_PAGE_SIZE = 100; // Helix /streams の1ページあたり最大件数
@@ -361,18 +369,24 @@ async function main() {
   // 1. 配信者の発見。二種類の発見結果をマージしてtracked_broadcastersに蓄積する。
   //    a. 対象ゲームカテゴリ × 日本語配信（ニッチなゲームの配信者を拾う）
   //    b. ゲームカテゴリを問わない日本語配信の視聴者数上位（釈迦・加藤純一のような大手配信者を拾う）
+  //    DISCOVERY_ENABLED=falseの間はスキップする（既存の追跡配信者のクリップ取得・
+  //    未バックフィル分の処理は以降の処理でこのフラグと無関係に継続する）。
   const discovered = new Map<string, string>(); // id -> name
-  for (const gameId of TARGET_GAME_IDS) {
-    const streams = await discoverJapaneseBroadcasters(token, gameId);
-    for (const s of streams) {
+  if (!DISCOVERY_ENABLED) {
+    console.log("配信者の新規発見は現在停止中です（DISCOVERY_ENABLED=false）。");
+  } else {
+    for (const gameId of TARGET_GAME_IDS) {
+      const streams = await discoverJapaneseBroadcasters(token, gameId);
+      for (const s of streams) {
+        discovered.set(s.user_id, s.user_name);
+      }
+    }
+    const topJaStreams = await discoverTopJapaneseBroadcasters(token);
+    for (const s of topJaStreams) {
       discovered.set(s.user_id, s.user_name);
     }
+    console.log(`新たに発見した配信者数: ${discovered.size}（うち人気順発見: ${topJaStreams.length}）`);
   }
-  const topJaStreams = await discoverTopJapaneseBroadcasters(token);
-  for (const s of topJaStreams) {
-    discovered.set(s.user_id, s.user_name);
-  }
-  console.log(`新たに発見した配信者数: ${discovered.size}（うち人気順発見: ${topJaStreams.length}）`);
 
   if (discovered.size > 0) {
     const avatars = await fetchProfileImages(token, [...discovered.keys()]);

@@ -41,6 +41,13 @@ const TARGET_GAME_IDS = (Deno.env.get("TARGET_GAME_IDS") ?? "")
   .map((s) => s.trim())
   .filter(Boolean);
 
+// 配信者の新規発見を一時停止する（2026-09-14、ユーザー指示）。追跡配信者数の増加ペースが
+// DB容量圧迫（新規発見のたびに過去クリップの一括バックフィルが走る、詳細はsync-twitch-clips.ts
+// 側の該当コメント参照）の主因になっていたため、「いまいる配信者でだいたい網羅できている」
+// という判断で一旦オフにした。既存の追跡配信者（tracked_broadcasters）のクリップ取得は
+// このフラグと無関係に引き続き行われる。再開する場合はtrueに戻すだけでよい。
+const DISCOVERY_ENABLED = false;
+
 const BROADCASTER_STALE_DAYS = 30; // sync-twitch-clips.tsと同じ「追跡対象」の定義に揃える
 const HELIX_STREAMS_ID_BATCH = 100; // Get Streamsはuser_idを1リクエスト最大100個まで指定できる
 const HELIX_CLIPS_PAGE_SIZE = 20; // 15分程度の短い窓で1配信者が20件を超えてクリップを作ることは想定しない
@@ -332,7 +339,9 @@ async function main() {
   //    詳細はファイル冒頭のコメント参照）。TARGET_GAME_IDS未設定でも本来の役目
   //    （追跡中配信者のクリップ取得）は継続できるよう、失敗時は警告のみで先へ進む。
   const discovered = new Map<string, string>(); // id -> name
-  if (TARGET_GAME_IDS.length === 0) {
+  if (!DISCOVERY_ENABLED) {
+    console.log("配信者の新規発見は現在停止中です（DISCOVERY_ENABLED=false）。");
+  } else if (TARGET_GAME_IDS.length === 0) {
     console.warn("TARGET_GAME_IDSが未設定のため、このスクリプトでの配信者新規発見はスキップします。");
   } else {
     for (const gameId of TARGET_GAME_IDS) {
