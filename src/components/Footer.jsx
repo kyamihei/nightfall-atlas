@@ -7,6 +7,7 @@ const X_URL = "https://x.com/kurisure_info";
 const LINKS = [
   { to: "/", label: "ホーム" },
   { to: "/about", label: "サイトについて" },
+  { to: "/updates", label: "更新情報" },
   { to: "/terms", label: "利用規約" },
   { to: "/privacy", label: "プライバシーポリシー" },
   { to: "/contact", label: "お問い合わせ" },

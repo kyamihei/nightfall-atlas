@@ -16,6 +16,7 @@ import GeneralThread from "./components/GeneralThread";
 import TagThreadList from "./components/TagThreadList";
 import TagThreadDetail from "./components/TagThreadDetail";
 import AboutPage from "./components/AboutPage";
+import UpdatesPage from "./components/UpdatesPage";
 import HowToUsePage from "./components/HowToUsePage";
 import TermsPage from "./components/TermsPage";
 import PrivacyPage from "./components/PrivacyPage";
@@ -80,6 +81,7 @@ function AppRoutes() {
         <Route path="/threads" element={<TagThreadList />} />
         <Route path="/threads/:id" element={<TagThreadDetail />} />
         <Route path="/about" element={<AboutPage />} />
+        <Route path="/updates" element={<UpdatesPage />} />
         <Route path="/guide" element={<HowToUsePage />} />
         <Route path="/terms" element={<TermsPage />} />
         <Route path="/privacy" element={<PrivacyPage />} />
