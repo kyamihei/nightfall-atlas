@@ -1,0 +1,17 @@
+-- get_ranked_clips()のオーバーロード曖昧化バグを修正（2026-09-17）。
+--
+-- トップページのクリップ一覧（メインの「総合ランキング」タブ）が「クリップの取得に失敗しました」と
+-- 表示され続けていた不具合の調査中に発見。本番DBに get_ranked_clips の旧シグネチャ
+-- （period_start, period_end, sort_by, page_limit, page_offset, streamer_filter の6引数、
+-- game_filter/tag_filter無し）が、20260904100000_game_filter.sqlのdrop function if existsが
+-- 実際には本番に適用されないまま、後続の8引数版（game_filter・tag_filter追加）と共存していた。
+-- フロント（useClips、src/lib/use-clip-ranking.ts）はgame_filter/tag_filterを指定しない場合
+-- （フィルタ未選択時、＝最も一般的なケース）は6引数分の名前付き引数だけをRPCへ渡すため、
+-- PostgRESTから見て「6引数版に完全一致」と「8引数版の残り2引数をデフォルト値で埋める」の
+-- 両方が候補になり "function get_ranked_clips(...) is not unique" エラーで常に失敗していた
+-- （本番相手にPostgRESTと同じ名前付き引数呼び出しで再現・特定済み）。
+--
+-- このプロジェクトで複数回踏んでいる「戻り値/引数を変える既存RPCを拡張する際はdrop function if
+-- existsを忘れない」という既知の罠と同種（CLAUDE.md「クリップ職人ランキング」「お気に入り数順
+-- ソート」節等参照）。正しい8引数版（tag_filter付き）はそのまま残し、旧6引数版だけを削除する。
+drop function if exists get_ranked_clips(timestamptz, timestamptz, text, int, int, text[]);

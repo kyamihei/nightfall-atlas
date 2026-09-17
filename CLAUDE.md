@@ -2342,6 +2342,72 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
 - 再開する場合は両ファイルの`DISCOVERY_ENABLED`を`true`に戻すだけでよい（コード上のコメントにも
   同内容を記載済み）。
 
+## 週間クリップ職人ランキング取得失敗・メインクリップ一覧取得失敗の修正（2026-09-17追加）
+
+- **ユーザー報告**: 「トップページを開いたとき、週間クリップ職人ランキングが取得失敗するのか
+  表示されないことが多い」「Supabaseのデータベース容量が500MB上限に対してオーバーしている、
+  データ削除は正常に定期的に行われているか」の2点。
+- **週間ランキングの原因**: `useTopClippersByPeriod`が呼ぶ`get_top_clippers_by_period`
+  （ライブ集計、「数千件規模なら軽い」という前提で導入、「クリップ職人ランキング」節参照）が、
+  追跡配信者8,634件規模でのバックフィルにより直近7日分だけで36,059件をJOIN・集計する規模に
+  なっていた。EXPLAIN ANALYZEで実測したところ実行計画がMerge Left Join+Sortに悪化し約9.7秒
+  かかっており、anon/authenticatedロールのstatement_timeout（3秒/8秒）を毎回のように超えて
+  タイムアウトしていた。フロント側がエラーを握りつぶして空配列のままloading=falseにするため、
+  `WeeklyClipperBoard`は失敗の表示すら出さずnullを返して消えていた（同じ関数の24時間版＝
+  「急上昇中のクリップ職人」は対象行数が少なく実測531msのため無関係、対象外）。
+  - **対応**: 年間/月間ランキングと同じ解決策（事前集計マテリアライズドビュー化）を適用。
+    `top_clippers_weekly_mv`（`twitch_created_at >= now() - interval '7 days'`、リフレッシュの
+    たびに範囲が自動スライド）と、それを読むだけの`get_top_clippers_this_week` RPCを新設
+    （`20260917000000_weekly_clipper_ranking_mv.sql`）。`refresh_ranking_view(text)`の許可リスト・
+    `sync-twitch-clips.ts`/`refresh-clip-views.ts`の`RANKING_VIEWS`にも追加し、既存の年間/月間と
+    同じ更新サイクル（最大1時間遅れ）に乗せた。フロントは`useTopClippersThisWeek`フックに置き換え
+    （`useTopClippersByPeriod`自体は24時間版のライブ集計用に残す）。ブラウザ実機確認で
+    1〜10位まで正しく表示されることを確認済み。
+  - **副次的に発見・修正した別バグ**: 調査中、トップページのメインクリップ一覧（`get_ranked_clips`）
+    も「クリップの取得に失敗しました」と表示され続けていることに気づいた。原因は本番DBに
+    `get_ranked_clips`の**旧6引数版**（`streamer_filter`まで、`game_filter`/`tag_filter`無し）と
+    **新8引数版**が両方存在していたこと。`20260904100000_game_filter.sql`のdrop
+    function文が実際には本番へ適用されないまま（`db push`ではなく`db query --linked`で
+    直接SQLを当てる運用のため、ローカルのmigrationファイル通りに順番適用されたとは限らない）
+    後続の`game_filter`/`tag_filter`追加が乗ってしまっていた。フロント（`useClips`）はフィルタ
+    未選択時（＝最も一般的なケース）は6引数分の名前付き引数だけをRPCへ渡すため、PostgRESTから見て
+    両方の関数が候補になり"function get_ranked_clips(...) is not unique"で常に失敗していた
+    （本番相手にPostgRESTと同じ名前付き引数呼び出しで再現・特定）。旧6引数版を
+    `drop function if exists`で削除して解決（`20260917010000_fix_ranked_clips_ambiguous_overload.sql`）。
+    このプロジェクトで複数回踏んでいる「戻り値/引数を変える既存RPCを拡張する際はdrop function if
+    existsを忘れない」罠の再発であり、**`db push`を使わず`db query --linked`で直接SQLを都度当てる
+    運用を続ける限り、migrationファイル通りの適用順序・内容が本番に反映されている保証は無い**
+    ことを踏まえておくこと（詳細は次節）。
+- **DB容量オーバーの原因**: `cleanup_low_view_clips()`のcron自体は正常に毎日実行されていた
+  （`cron.job_run_details`・`clip_cleanup_log`ともに連続成功を確認、"cleanupが止まっている"わけ
+  ではなかった）。ただし追跡配信者数が8,634件規模まで増えたことに伴うバックフィル起因で
+  新規クリップ流入が実測38,724件/日に達しており、1日1回・`p_batch_size=15000`
+  （`20260907020000_increase_cleanup_batch_size.sql`で設定）の処理能力（15,000件/日）では
+  追いつかず、削除対象の未処理バックログが本番実測で52,657件、DB容量701MB（うちclipsテーブル
+  586MB）まで再肥大化していた。
+  - **対応**（ユーザーに処理能力アップ/削除条件強化/プラン変更の3択を確認し「処理能力アップ」を
+    選択）: 削除条件（14日超過・視聴回数50回未満）は変更せず、cronの実行頻度を1日1回→4時間おき
+    （1日6回、最大90,000件/日）に引き上げた（`20260917020000_cleanup_cron_increase_frequency.sql`）。
+    バッチサイズ自体は15,000のまま据え置き（`db query --linked`経由で15,000件の手動実行を試したところ
+    statement timeoutでキャンセルされることを確認済み＝現在の負荷下では1回のバッチをこれ以上
+    大きくするのは危険。pg_cronの`postgres`ロール実行では過去3日連続成功しているため、既存の
+    バッチサイズのまま頻度だけ上げる方針にした）。
+  - **今後の教訓**: 追跡配信者数・新規クリップ流入ペースが短期間で数倍になった場合、クリーンアップの
+    処理能力もそれに応じて見直しが必要になる。`clip_cleanup_log`の`deleted_count`が連日
+    `p_batch_size`上限に張り付いている（＝バックログが捌けきれていない兆候）場合は、削除条件
+    （ユーザーと合意したポリシーそのもの）を緩める前に、まず頻度/バッチサイズという「処理能力」側の
+    パラメータを疑うこと。
+- **運用上の教訓（`db push`について）**: このセッションで`supabase db push --linked`を試したところ、
+  CLIが追跡している`supabase_migrations.schema_migrations`テーブルの最終記録が`20260903180000`で
+  止まっており（それ以降の全マイグレーションは`db query --linked`での直接適用のみで、CLIの
+  migration historyには記録されていなかった）、CLIが2026-09-04以降の全ファイルを最初から
+  リプレイしようとして`20260904000000_members.sql`内の関数シグネチャ不一致で失敗した
+  （実害無し、1マイグレーション単位のトランザクションでロールバック済みを確認）。
+  **今後もこのプロジェクトでは`db push`を使わず、個別の変更を都度`db query --linked --file <新規
+  migrationファイル>`で直接本番に当てる運用を継続すること**（CLAUDE.md冒頭の環境変数節にある
+  既存の運用方針と一致）。migrationファイルは実行した内容の記録として残すが、CLIの自動適用機能は
+  使わない前提を忘れないこと。
+
 # ステアリング
 
 - git commitを行う際は、同じタイミングでリモート（origin）へのpushも必ず行うこと。ユーザーから別途pushを依頼されるのを待たない。

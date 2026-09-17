@@ -17,7 +17,7 @@ import {
   useCommentReport,
   useBroadcasterAvatars,
   useClipperRanks,
-  useTopClippersByPeriod,
+  useTopClippersThisWeek,
   useTrendingClips,
   useActivityFeed,
   useMyBroadcasterTags,
@@ -1029,18 +1029,10 @@ export default function ClipRanking() {
   }, [clips, trendingClips]);
   const clipperRanks = useClipperRanks(creatorIds);
 
-  // 週間クリップ職人ランキング（トップページ表示用）。7日間の範囲はマウント時に1度だけ固定し、
-  // 毎レンダーでnew Date()を作って参照が変わり続ける（＝useEffectが無限に再発火する）のを防ぐ。
-  const weekRange = useMemo(() => {
-    const end = new Date();
-    const start = new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000);
-    return { start: start.toISOString(), end: end.toISOString() };
-  }, []);
-  const { clippers: weeklyClippers, loading: weeklyClippersLoading } = useTopClippersByPeriod(
-    weekRange.start,
-    weekRange.end,
-    10,
-  );
+  // 週間クリップ職人ランキング（トップページ表示用）。事前集計マテリアライズドビュー
+  // （top_clippers_weekly_mv）を読むだけのRPCのため、期間をフロント側で計算する必要はない
+  // （詳細はuseTopClippersThisWeekのコメント参照）。
+  const { clippers: weeklyClippers, loading: weeklyClippersLoading } = useTopClippersThisWeek(10);
 
   const [activeCommentClipId, setActiveCommentClipId] = useState(null);
   const [commentsDataByClip, setCommentsDataByClip] = useState({});

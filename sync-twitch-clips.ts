@@ -64,6 +64,7 @@ const RANKING_VIEWS = [
   "top_clippers_mv",
   "top_clippers_this_year_mv",
   "top_clippers_this_month_mv",
+  "top_clippers_weekly_mv",
   "admin_dashboard_clip_stats_mv",
   "top_games_mv",
 ] as const;

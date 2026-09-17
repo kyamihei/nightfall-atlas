@@ -585,6 +585,36 @@ create materialized view top_clippers_this_month_mv as
 create unique index if not exists idx_top_clippers_this_month_mv_creator on top_clippers_this_month_mv(creator_id);
 create index if not exists idx_top_clippers_this_month_mv_views on top_clippers_this_month_mv(total_views desc);
 
+-- 週間クリップ職人ランキング（トップページ`WeeklyClipperBoard`表示用）。get_top_clippers_by_period
+-- （ライブ集計）は「数千件規模なら軽い」という前提だったが、追跡配信者急増に伴う直近7日分の
+-- クリップ数増加で実行計画が悪化し本番実測で約9.7秒（statement_timeoutを大きく超過）かかっていた
+-- ため、年間/月間と同じく事前集計マテリアライズドビュー化した（2026-09-17、
+-- 20260917000000_weekly_clipper_ranking_mv.sql参照）。now()基準の範囲はリフレッシュのたびに
+-- 再評価されるため、日次〜1時間おきのリフレッシュが走っている限り自動的にスライドする。
+drop materialized view if exists top_clippers_weekly_mv;
+create materialized view top_clippers_weekly_mv as
+  select c.creator_id,
+    max(c.creator_name) as creator_name,
+    sum(c.view_count) as total_views,
+    count(*) as clip_count,
+    max(tc.profile_image_url) as profile_image_url
+  from clips c
+  left join tracked_clippers tc on tc.creator_id = c.creator_id
+  where c.creator_id is not null
+    and c.twitch_created_at >= now() - interval '7 days'
+  group by c.creator_id;
+
+create unique index if not exists idx_top_clippers_weekly_mv_creator on top_clippers_weekly_mv(creator_id);
+create index if not exists idx_top_clippers_weekly_mv_views on top_clippers_weekly_mv(total_views desc);
+
+create or replace function get_top_clippers_this_week(clipper_limit int default 10, clipper_offset int default 0)
+returns table(creator_id text, creator_name text, total_views bigint, clip_count bigint, profile_image_url text) as $$
+  select creator_id, creator_name, total_views, clip_count, profile_image_url
+  from top_clippers_weekly_mv
+  order by total_views desc
+  limit clipper_limit offset clipper_offset;
+$$ language sql stable;
+
 -- sync-twitch-clips.ts が同期完了後に呼び出す。service_roleのみ実行可（匿名/認証ユーザーからの
 -- 乱用によるリフレッシュ連打を防ぐため、publicへのEXECUTE権限を明示的に外している）。
 create or replace function refresh_ranking_views()
@@ -594,6 +624,7 @@ begin
   refresh materialized view concurrently top_clippers_mv;
   refresh materialized view concurrently top_clippers_this_year_mv;
   refresh materialized view concurrently top_clippers_this_month_mv;
+  refresh materialized view concurrently top_clippers_weekly_mv;
 end;
 $$ language plpgsql security definer;
 
@@ -1646,6 +1677,7 @@ begin
   refresh materialized view concurrently top_clippers_mv;
   refresh materialized view concurrently top_clippers_this_year_mv;
   refresh materialized view concurrently top_clippers_this_month_mv;
+  refresh materialized view concurrently top_clippers_weekly_mv;
   refresh materialized view concurrently admin_dashboard_clip_stats_mv;
   refresh materialized view concurrently top_games_mv;
 end;
@@ -1654,7 +1686,7 @@ $$ language plpgsql security definer;
 revoke execute on function refresh_ranking_views() from public;
 grant execute on function refresh_ranking_views() to service_role;
 
--- refresh_ranking_views()は6ビュー分の合計実行時間（実測100〜126秒）がSupabase REST API
+-- refresh_ranking_views()は7ビュー分の合計実行時間（実測100〜126秒）がSupabase REST API
 -- ゲートウェイのタイムアウト（実測約120〜126秒、DB側statement_timeoutとは別にゲートウェイ層で
 -- 課される制約でロール設定では回避不可）に達し、RPC経由の呼び出しがサイレントに失敗し続けていた
 -- （2026-09-14発覚、詳細は20260914010000_granular_ranking_view_refresh.sql参照）。
@@ -1668,6 +1700,7 @@ begin
     'top_clippers_mv',
     'top_clippers_this_year_mv',
     'top_clippers_this_month_mv',
+    'top_clippers_weekly_mv',
     'admin_dashboard_clip_stats_mv',
     'top_games_mv'
   ) then
@@ -2078,11 +2111,16 @@ $$;
 revoke execute on function cleanup_low_view_clips(int, int, int) from public;
 grant execute on function cleanup_low_view_clips(int, int, int) to service_role;
 
--- 毎日UTC 18:00（JST 3:00）にpg_cronから直接呼ぶ（Twitch APIを叩かない純粋なSQL操作のため、
+-- 4時間おき（1日6回）にpg_cronから直接呼ぶ（Twitch APIを叩かない純粋なSQL操作のため、
 -- 他の同期ジョブと違いGitHub Actions経由にしない）。
 -- p_batch_size=15000は2026-09-07に2000から引き上げ済み（詳細は
 -- 20260907020000_increase_cleanup_batch_size.sql参照。追跡配信者数の増加に伴うバックフィル量
 -- 増加でデフォルト2000件/日では処理が追いつかなくなったため）。
+-- **実行頻度を1日1回→4時間おきに変更**（2026-09-17）: 追跡配信者数がさらに8,634件まで増加し
+-- 新規クリップ流入が実測38,724件/日に達したため、1日1回・15,000件/回の処理能力（15,000件/日）
+-- では追いつかず、削除対象の未処理バックログが52,657件・DB容量701MBまで再肥大化した。
+-- 削除条件（14日超過・視聴回数50回未満）自体は変更せず、処理能力だけを6倍（最大90,000件/日）に
+-- 引き上げた（20260917020000_cleanup_cron_increase_frequency.sql参照）。
 -- **refresh_ranking_views()はここでは呼ばない**（2026-09-14修正）: pg_cronがこのジョブを実行する
 -- `postgres`ロールはservice_roleと違いstatement_timeoutが120秒（インスタンス既定値）のままのため、
 -- 6ビュー分のリフレッシュがこれを超えてタイムアウトすると、同じコマンド文字列内（=暗黙の1トランザクション）の
@@ -2093,7 +2131,7 @@ grant execute on function cleanup_low_view_clips(int, int, int) to service_role;
 -- 既に定期的に呼んでいるため、ここでの呼び出しは冗長かつ有害と判断し削除した。
 select cron.schedule(
   'trigger-cleanup-low-view-clips',
-  '0 18 * * *',
+  '0 */4 * * *',
   $$
   select cleanup_low_view_clips(14, 50, 15000);
   $$

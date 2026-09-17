@@ -1399,7 +1399,38 @@ export function useClipperRanks(creatorIds: (string | null | undefined)[]) {
   return ranks;
 }
 
-/** 週間クリップ職人ランキング（トップページ表示用）。指定した期間内に作られたクリップの合計視聴回数順 */
+/**
+ * 週間クリップ職人ランキング（トップページ`WeeklyClipperBoard`表示用）。
+ * get_top_clippers_by_period（ライブ集計）は追跡配信者の急増に伴う直近7日分のクリップ数増加で
+ * 実行計画が悪化し本番で約9.7秒かかりタイムアウトしていたため、年間/月間ランキングと同じく
+ * 事前集計のマテリアライズドビュー（top_clippers_weekly_mv、最大1時間遅れで更新）を読むだけの
+ * get_top_clippers_this_week RPCに切り替えた（詳細は20260917000000_weekly_clipper_ranking_mv.sql）。
+ */
+export function useTopClippersThisWeek(limit = 10) {
+  const [clippers, setClippers] = useState<TopClipper[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const { data, error } = await supabase.rpc("get_top_clippers_this_week", {
+        clipper_limit: limit,
+      });
+      if (cancelled) return;
+      if (error) console.error("週間クリップ職人ランキングの取得に失敗:", error.message);
+      if (!error) setClippers(data ?? []);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [limit]);
+
+  return { clippers, loading };
+}
+
+/** 「急上昇中のクリップ職人」（ライブ活動フィード用、24時間ウィンドウ）等、その場で期間集計したい場合に使う */
 export function useTopClippersByPeriod(periodStart: string, periodEnd: string, limit = 5) {
   const [clippers, setClippers] = useState<TopClipper[]>([]);
   const [loading, setLoading] = useState(true);
