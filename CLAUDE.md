@@ -2484,3 +2484,10 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
 - このリポジトリではOpenSSLバックエンドでCA証明書検証エラーが発生する環境のため、`git config http.sslBackend schannel` をローカルリポジトリ設定として適用済み（2026-09-02）。pushが失敗する場合はこの設定が外れていないか確認すること。
 - UIに装飾目的の絵文字（😲など）を使わないこと（2026-09-03、ユーザー指摘）。アイコンが必要な箇所は
   既存パターンに倣って`lucide-react`のアイコンコンポーネントを使う。
+
+## Disk IOバジェット枯渇によるDB応答停止・Nano→Microで復旧（2026-10-01追加、重要）
+
+- **発端**: 10/1 JST 9:00の`post-daily-ranking`が`トレンドランキングの取得に失敗しました: upstream request timeout`で失敗（GitHubからの失敗通知メール）。スクリプトの問題ではなく、**本番DB全体が応答不能**だった（`clips?limit=1`すらRESTが20秒でタイムアウト、`supabase db query --linked`も`Connection terminated due to connection timeout`）。`clip_cleanup_log`も9/30 16:00 UTCの実行を最後に20:00・00:00 UTC分が欠落しており、停止は9/30夜頃から。
+- **原因**: ダッシュボードでステータス`Unhealthy`、「Disk IO Budgetを使い切る」警告。Computeが**Nano（共有CPU・0.5GB RAM、ディスクIOベースライン5MB/s）**で、クリップ同期・cleanup・ビュー更新の負荷がIOバジェットを食い潰していた。9/30のディスク満杯障害（8GB化済み）とは別の原因（ディスク容量ではなくIO/メモリ）。
+- **対応**: Infrastructure → Compute sizeを**Nano→Micro（1GB RAM）**に変更。Pro Planでは同額（月$9.68のまま、+$0.00）の無料アップグレード。プロジェクトが自動再起動し、約3〜4分で復旧。復旧後は`get_trending_clips`約0.9秒、`get_ranked_clips`約0.4秒で200応答。
+- **今後の教訓**: ①`upstream request timeout`が単一RPCではなく全RPC/CLI接続で出るときはDB全体の不調（ダッシュボードのStatusとDisk IO/CPU/RAMを最初に確認）。②再発する場合はSmall（$0.0206/時≒+$5/月）以上を検討（費用はユーザーに確認すること）。③クリーンアップ・同期の負荷が高い時間帯がIOバジェットを使い切るので、Microでも再発するなら処理の分散や頻度見直しが必要。
