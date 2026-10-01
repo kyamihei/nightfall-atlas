@@ -116,20 +116,48 @@ async function main() {
   let totalUpdated = 0;
   let viewDelta = 0; // 更新前後のview_count差分の合計（実際にどれくらいズレていたかの目安）
 
+  // 新しいクリップほど視聴回数の伸びが速く、古さ順の巡回だけだと数十時間更新されず
+  // 実際の値と大きくズレる（2026-10-01発覚、直近3日の上位クリップで最大4割近い乖離）。
+  // そのため段階（tier）を設け、新しいクリップから順に「更新から一定時間以上経っているもの」を
+  // 先に処理し、残りの予算を従来どおりの古さ順ラウンドロビン（最終tier）に回す。
+  const nowMs = Date.now();
+  const hoursAgo = (h: number) => new Date(nowMs - h * 3_600_000).toISOString();
+  const tiers: { label: string; createdAfter: string | null; syncedBefore: string | null }[] = [
+    { label: "2日以内", createdAfter: hoursAgo(48), syncedBefore: hoursAgo(1) },
+    { label: "7日以内", createdAfter: hoursAgo(24 * 7), syncedBefore: hoursAgo(8) },
+    { label: "全体（古い順）", createdAfter: null, syncedBefore: null },
+  ];
+  let tierIndex = 0;
+  let tierProcessed = 0;
+
   while (totalProcessed < MAX_CLIPS_PER_RUN) {
     const take = Math.min(BATCH_SIZE, MAX_CLIPS_PER_RUN - totalProcessed);
+    const tier = tiers[tierIndex];
 
-    const { data: batch, error } = await supabase
+    let query = supabase
       .from("clips")
       .select("id, view_count")
       .order("view_count_synced_at", { ascending: true, nullsFirst: true })
       .limit(take);
+    if (tier.createdAfter) query = query.gte("twitch_created_at", tier.createdAfter);
+    if (tier.syncedBefore) {
+      query = query.or(`view_count_synced_at.is.null,view_count_synced_at.lt.${tier.syncedBefore}`);
+    }
+    const { data: batch, error } = await query;
 
     if (error) {
       console.error("対象クリップの取得に失敗しました:", error.message);
       break;
     }
-    if (!batch || batch.length === 0) break;
+    if (!batch || batch.length === 0) {
+      if (tierIndex < tiers.length - 1) {
+        console.log(`tier「${tier.label}」を処理完了（${tierProcessed}件）。次のtierへ進みます。`);
+        tierIndex++;
+        tierProcessed = 0;
+        continue;
+      }
+      break;
+    }
 
     const ids = batch.map((c) => c.id as string);
     const prevViews = new Map(batch.map((c) => [c.id as string, c.view_count as number]));
@@ -153,11 +181,17 @@ async function main() {
     }
 
     totalProcessed += ids.length;
+    tierProcessed += ids.length;
     totalUpdated += found.size;
 
-    // 同じクエリを繰り返すと（バッチ数が要求件数に満たない＝クリップ総数がMAX_CLIPS_PER_RUNより
-    // 少ない場合）無限ループになるため、要求件数に満たなければそこで打ち切る
-    if (ids.length < take) break;
+    // 要求件数に満たない＝そのtierの対象を使い切った。次のtierへ進む（最終tierなら、同じクエリを
+    // 繰り返すと無限ループになるためそこで打ち切る）
+    if (ids.length < take) {
+      if (tierIndex >= tiers.length - 1) break;
+      console.log(`tier「${tier.label}」を処理完了（${tierProcessed}件）。次のtierへ進みます。`);
+      tierIndex++;
+      tierProcessed = 0;
+    }
   }
 
   console.log(
