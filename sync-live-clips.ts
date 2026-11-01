@@ -50,10 +50,10 @@ const DISCOVERY_ENABLED = false;
 
 const BROADCASTER_STALE_DAYS = 30; // sync-twitch-clips.tsと同じ「追跡対象」の定義に揃える
 const HELIX_STREAMS_ID_BATCH = 100; // Get Streamsはuser_idを1リクエスト最大100個まで指定できる
-const HELIX_CLIPS_PAGE_SIZE = 20; // 15分程度の短い窓で1配信者が20件を超えてクリップを作ることは想定しない
+const HELIX_CLIPS_PAGE_SIZE = 50; // 60分の窓で1配信者が50件を超えてクリップを作ることは想定しない
 // 実行間隔（15分想定）より広めに取ることで、実行の遅延・失敗が1回あっても
 // 次回実行で取りこぼしなくカバーできるようにする安全マージン
-const CLIP_LOOKBACK_MINUTES = 30;
+const CLIP_LOOKBACK_MINUTES = 60; // 2026-11-01: 実行間隔を30分に変更（Free化の縮小運用）、間隔の2倍を確保
 const RATE_LIMIT_RETRY_MAX = 3;
 const RATE_LIMIT_DEFAULT_WAIT_MS = 10_000;
 // discoveryは15分おきに毎回呼ぶため、日次版（sync-twitch-clips.ts、TOP_JA_STREAMS_LIMIT=400）より

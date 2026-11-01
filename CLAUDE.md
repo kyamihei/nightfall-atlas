@@ -2509,3 +2509,10 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
 - **原因**: `https://esm.sh/@supabase/supabase-js@2`（バージョン未固定）を使い、推移依存の`tslib`をdeno.lockのハッシュで検証していたが、esm.shのCDNが同一URLに対して2種類の中身を返すことがあり、ロックと違う側に当たった実行だけ起動直後に落ちる（成功/失敗が混在するため「一過性」に見えて判断を誤りやすかった。最初は1回だけの一過性と判断したが、実行履歴を遡ると反復していた）。
 - **対応**: 全Denoスクリプトのimportを`npm:@supabase/supabase-js@2.112.4`（バージョン固定）に変更し、`deno.lock`を再生成（npmのsha512 integrityで検証、`esm.sh`エントリは0件）。リポジトリルートに`package.json`があるとDenoは`node_modules`必須モードに入りCIで`Could not find "@supabase/supabase-js" in a node_modules folder`になるため、4つのワークフローの`deno run`に`--node-modules-dir=none`を付けた。ローカルで`deno check --node-modules-dir=none --frozen`が4本とも通ることを確認済み。
 - **今後の教訓**: ①断続的な失敗は「1回だけ」と決めつけず`gh run list --json conclusion`で失敗の頻度と共通エラーを確認する。②`esm.sh`等のCDN import＋lockfileは、CDN側のビルド揺れでロック不一致になりうる。固定versionの`npm:`/`jsr:`を使う。③新しいDenoスクリプト/ワークフローを追加するときも`--node-modules-dir=none`を付けること。
+
+## 無料運用（Free plan）への縮小（2026-11-01着手、進行中）
+
+- 方針（ユーザー合意）: Supabase ProをFreeへ戻し、Xは従量課金のまま週1投稿（土曜のクリップ職人ランキング）に絞る。X API無料枠は2026年2月に新規向けに廃止済み。
+- 実測（着手時）: DB 1,369MB（Free上限500MB）、`clips` 786MB/約79万行、追跡配信者8,634人。配信者上位300人で全クリップの51%・上位500人で72%を占めるため、配信者削減だけでは不足でクリップ保持ルールが必須。
+- **実施済み**: ①cron頻度変更（`20261101000000_downsize_cron_schedules.sql`: ライブ同期30分おき＋`CLIP_LOOKBACK_MINUTES`を60分に拡大、view_count同期6時間おき、X投稿は土曜のみ`0 0 * * 6`）。②追跡配信者を累計視聴回数上位500人に削除（`20261101010000_shrink_tracked_broadcasters_top500.sql`、削除前の全件バックアップはスクラッチパッドの`tracked_broadcasters_backup.json`）、残りは`backfilled_at`を埋めて過去分再流入を防止。
+- **未実施（分類器がクリップの一括削除をブロック、ユーザー判断待ち）**: クリップを「追跡中配信者のクリップで、視聴1,000以上または直近14日」のみ残して削除（残る見込み約22.5万件）。コメント/お気に入り/リアクション/スタンプ/タグ付きと`daily_ranking_posts`参照クリップは保護。その後`vacuum full clips`、`tracked_clippers`/`top_clippers_mv`/`page_views`の整理、`cleanup_low_view_clips`のcronを`(14, 1000, ...)`へ変更、容量実測後にProをダウングレード。
