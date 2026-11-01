@@ -2501,3 +2501,11 @@ Twitchクリップのランキング掲示板。お気に入り・独自リア�
   - tierのクエリは`idx_clips_view_count_synced_at`を使い、実測1回約2秒（service_roleのstatement_timeout=300秒には十分収まる）。
   - `UpdatesPage.jsx`にも訪問者向けの文言を追記済み。
 - **今後の教訓**: 新着ほど値が速く変わるデータの定期再同期は、一律ラウンドロビンではなく鮮度要件の高いものを優先する設計にすること。「同期済み件数」の割合だけ見ても鮮度は分からないので、実際にユーザーが見る上位クリップの`view_count_synced_at`の経過時間とTwitch APIの値を直接比較して検証すること。
+
+## Denoスクリプトの依存をesm.shからnpm:に変更（2026-11-01追加、重要）
+
+- **症状**: GitHub Actionsの`sync-live-clips`/`refresh-clip-views`が7〜13秒で断続的に失敗（10/31だけで`sync-live-clips`が9回、`refresh-clip-views`が2回、11/1にも1回）。全ログで同一のエラー:
+  `Integrity check failed for remote specifier ... https://esm.sh/tslib@2.8.1/denonext/tslib.mjs`（Actualは常に`ebce3cd5…`、`deno.lock`のExpectedは`c38da5dd…`）。
+- **原因**: `https://esm.sh/@supabase/supabase-js@2`（バージョン未固定）を使い、推移依存の`tslib`をdeno.lockのハッシュで検証していたが、esm.shのCDNが同一URLに対して2種類の中身を返すことがあり、ロックと違う側に当たった実行だけ起動直後に落ちる（成功/失敗が混在するため「一過性」に見えて判断を誤りやすかった。最初は1回だけの一過性と判断したが、実行履歴を遡ると反復していた）。
+- **対応**: 全Denoスクリプトのimportを`npm:@supabase/supabase-js@2.112.4`（バージョン固定）に変更し、`deno.lock`を再生成（npmのsha512 integrityで検証、`esm.sh`エントリは0件）。リポジトリルートに`package.json`があるとDenoは`node_modules`必須モードに入りCIで`Could not find "@supabase/supabase-js" in a node_modules folder`になるため、4つのワークフローの`deno run`に`--node-modules-dir=none`を付けた。ローカルで`deno check --node-modules-dir=none --frozen`が4本とも通ることを確認済み。
+- **今後の教訓**: ①断続的な失敗は「1回だけ」と決めつけず`gh run list --json conclusion`で失敗の頻度と共通エラーを確認する。②`esm.sh`等のCDN import＋lockfileは、CDN側のビルド揺れでロック不一致になりうる。固定versionの`npm:`/`jsr:`を使う。③新しいDenoスクリプト/ワークフローを追加するときも`--node-modules-dir=none`を付けること。

@@ -13,7 +13,7 @@
 //
 // 実行例: deno run --allow-net --allow-env refresh-clip-views.ts
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.112.4";
 
 const TWITCH_CLIENT_ID = Deno.env.get("TWITCH_CLIENT_ID")!;
 const TWITCH_CLIENT_SECRET = Deno.env.get("TWITCH_CLIENT_SECRET")!;

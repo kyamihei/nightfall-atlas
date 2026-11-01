@@ -11,7 +11,7 @@
 //   - 1行に1つ、Twitchのログイン名（channel URLの twitch.tv/<ここ> の部分）
 //   - 空行、および # から始まる行は無視する
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.112.4";
 
 const TWITCH_CLIENT_ID = Deno.env.get("TWITCH_CLIENT_ID")!;
 const TWITCH_CLIENT_SECRET = Deno.env.get("TWITCH_CLIENT_SECRET")!;

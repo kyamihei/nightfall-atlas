@@ -43,4 +43,4 @@ jobs:
           X_API_KEY_SECRET: ${{ secrets.X_API_KEY_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
-        run: deno run --allow-net --allow-env post-daily-ranking.ts
+        run: deno run --node-modules-dir=none --allow-net --allow-env post-daily-ranking.ts

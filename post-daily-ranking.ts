@@ -31,7 +31,7 @@
 // 外部ライブラリに頼らず、Web Crypto API（HMAC-SHA1）で署名を自前計算する
 // （このプロジェクトの「スクリプトは自己完結させる」方針を踏襲）。
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.112.4";
 import { Image } from "jsr:@matmen/imagescript@1.3.1";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;

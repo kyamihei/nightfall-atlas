@@ -30,7 +30,7 @@
 //   SUPABASE_SERVICE_ROLE_KEY
 //   TARGET_GAME_IDS   カンマ区切りのTwitchゲームID一覧（sync-twitch-clips.tsと同じもの）
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.112.4";
 
 const TWITCH_CLIENT_ID = Deno.env.get("TWITCH_CLIENT_ID")!;
 const TWITCH_CLIENT_SECRET = Deno.env.get("TWITCH_CLIENT_SECRET")!;
